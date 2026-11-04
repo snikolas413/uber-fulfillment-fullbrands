@@ -48,18 +48,16 @@ npm run build
 ## Configuração de ambiente
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY` (somente servidor)
-- `OMIE_APP_HASH`
-- `OMIE_ACCESS_TOKEN`
-- `OMIE_REFRESH_TOKEN`
-- `OMIE_ACCESS_TOKEN_ISSUED_AT` (ISO 8601)
+- `SUPABASE_SERVICE_ROLE_KEY` (somente servidor, necessário para o modo Bearer/Vault)
+- `OMIE_APP_KEY` e `OMIE_APP_SECRET` (modo tradicional)
+- `OMIE_APP_HASH`, `OMIE_ACCESS_TOKEN`, `OMIE_REFRESH_TOKEN` e `OMIE_ACCESS_TOKEN_ISSUED_AT` (modo Bearer)
 - `OMIE_API_BASE_URL` (opcional)
 - `APP_BASE_URL` (opcional)
 
-As credenciais Omie próprias da aplicação precisam estar configuradas no serviço Render antes de habilitar operações externas. A conexão do Omie disponível no ambiente de desenvolvimento não é herdada pelo app publicado.
+O cliente aceita App Key/Secret no servidor ou token Bearer renovável armazenado no Supabase Vault. Se App Key e App Secret estiverem configurados juntos, o aplicativo usa esse modo tradicional. Não configure os dois modelos ao mesmo tempo sem uma decisão explícita de migração.
 
 ## Estado das integrações
 - As migrations de e-mail, Vault e metadados foram aplicadas no projeto Supabase conectado em 04/11/2026 e verificadas.
-- A integração Correios continua dentro do Omie; este aplicativo não utiliza uma API paralela dos Correios.
+- A integração Correios continua dentro do Omie; este aplicativo não utiliza uma API paralela dos Correios nem depende do webhook para o fluxo atual.
 - Ações externas do Omie exigem credenciais próprias da aplicação e validação fiscal/comercial antes do primeiro pedido real.
 - Faturamento e expedição devem ser testados de forma assistida. Não execute faturamento real sem conferir o pedido e confirmar a ação.
