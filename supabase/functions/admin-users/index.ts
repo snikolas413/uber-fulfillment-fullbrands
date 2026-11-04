@@ -140,7 +140,9 @@ Deno.serve(async (request: Request) => {
         : { data: [], error: null };
 
       if (profilesError) throw profilesError;
-      const profileById = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
+      const profileById = new Map<string, (typeof profiles)[number]>(
+        (profiles ?? []).map((profile) => [profile.id, profile] as [string, (typeof profiles)[number]])
+      );
       const users = authUsers.map((item) => {
         const profile = profileById.get(item.id);
         return {
