@@ -21,7 +21,7 @@ export default function DashboardPage() {
    </article>
    <article className="panel integration-panel"><div className="panel-heading"><div><span className="section-kicker">SAÚDE DAS CONEXÕES</span><h2>Integrações</h2></div><span className="panel-icon"><PackageSearch size={18}/></span></div>
     <div className="integration-row"><div className="integration-mark omie-mark">O</div><div className="integration-copy"><strong>Omie ERP</strong><small>Pedidos, NF-e e fretes</small></div><span className="status-tag status-pending">Credenciais pendentes</span></div>
-    <div className="integration-row"><div className="integration-mark database-mark">DB</div><div className="integration-copy"><strong>Banco de dados</strong><small>Projeto dedicado provisionado · login pendente</small></div><span className="status-tag status-review">Provisionado</span></div>
+    <div className="integration-row"><div className="integration-mark database-mark">DB</div><div className="integration-copy"><strong>Banco de dados</strong><small>Projeto dedicado provisionado · autenticação ativa</small></div><span className="status-tag status-review">Provisionado</span></div>
     <div className="integration-row"><div className="integration-mark shipping-mark"><Truck size={17}/></div><div className="integration-copy"><strong>Correios</strong><small>Mini Envios e etiquetas</small></div><span className="status-tag status-review">A validar</span></div>
     <div className="integration-footnote"><span className="footnote-dot"/> Preview sem operações reais ou cadastro de dados pessoais.</div>
    </article>

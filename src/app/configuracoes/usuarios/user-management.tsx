@@ -129,8 +129,8 @@ export function UserManagement({ currentUserId }: { currentUserId: string }) {
       setSuccessMessage("Perfil atualizado.");
       await loadUsers();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Não foi possível atualizar o perfil.");
       await loadUsers();
+      setErrorMessage(error instanceof Error ? error.message : "Não foi possível atualizar o perfil.");
     } finally {
       setSaving(false);
     }
@@ -145,8 +145,8 @@ export function UserManagement({ currentUserId }: { currentUserId: string }) {
       setSuccessMessage(user.is_active ? "Acesso desativado." : "Acesso ativado.");
       await loadUsers();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Não foi possível alterar o acesso.");
       await loadUsers();
+      setErrorMessage(error instanceof Error ? error.message : "Não foi possível alterar o acesso.");
     } finally {
       setSaving(false);
     }

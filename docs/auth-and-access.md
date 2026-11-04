@@ -3,59 +3,43 @@
 ## Modelo de acesso
 - Não há cadastro público na aplicação.
 - E-mail e senha são autenticados pelo Supabase Auth.
-- Novas contas são criadas com perfil `operador`, porém começam **inativas**.
-- Um administrador precisa ativar o perfil e atribuir um dos papéis: `admin`, `gestor`, `operador` ou `consulta`.
-- O proxy Next.js valida os claims da sessão e consulta `user_profiles.is_active` antes de liberar as páginas privadas.
-- As políticas RLS aplicam as mesmas permissões no PostgreSQL. Esconder uma página não substitui RLS.
+- O primeiro administrador é cadastrado inicialmente no painel do Supabase e promovido no perfil user_profiles.
+- Novos colaboradores são convidados pela tela Configurações > Usuários e permissões.
+- Novos perfis começam inativos. O colaborador confirma o e-mail e define a própria senha; depois, um administrador ativo libera o acesso operacional.
+- O proxy Next.js valida a sessão e consulta user_profiles.is_active antes de liberar as páginas privadas.
+- As políticas RLS aplicam as permissões no PostgreSQL. Esconder uma página não substitui RLS.
 
-## Preparação obrigatória no Supabase Dashboard
-1. Abra Authentication > URL Configuration.
-2. Configure Site URL como `https://uber-fulfillment-fullbrands.onrender.com`.
-3. Adicione `https://uber-fulfillment-fullbrands.onrender.com/auth/callback` à lista de Redirect URLs.
-4. Em Authentication > Providers > Email, mantenha login por senha habilitado.
-5. Desative signups públicos. Contas devem ser criadas apenas pelo administrador no painel Supabase.
+## Preparação no Supabase Dashboard
+1. Em Authentication > URL Configuration, configure Site URL como https://uber-fulfillment-fullbrands.onrender.com.
+2. Adicione https://uber-fulfillment-fullbrands.onrender.com/redefinir-senha à lista de Redirect URLs.
+3. Em Authentication > Providers > Email, mantenha login por senha habilitado.
+4. Desative signups públicos. Convites administrativos continuam sendo feitos pela Auth Admin API do Edge Function.
+5. Para recuperação de senha por e-mail, configure um SMTP próprio em Authentication > SMTP Settings e valide o remetente.
 
 ## Primeiro administrador
-O conector de administração do Supabase desta sessão não oferece criação/invitação de usuários. O primeiro acesso precisa ser criado pelo responsável no Dashboard:
-1. Abra Authentication > Users e escolha Add user > Create new user.
-2. Informe o e-mail corporativo e uma senha inicial exclusiva. Confirme o usuário no Dashboard.
-3. No SQL Editor, execute o comando abaixo substituindo o e-mail pelo endereço criado:
+A conta inicial foi criada em Authentication > Users. O perfil precisa retornar role = admin e is_active = true. Para conferir:
 
-```sql
-update public.user_profiles
-set role = 'admin',
-    is_active = true,
-    updated_at = now()
-where lower(email) = lower('SEU-EMAIL-CORPORATIVO')
-returning id, email, role, is_active;
-```
+\`\`\`sql
+select id, email, role, is_active
+from public.user_profiles
+where lower(email) = lower('nikolas.alves@fullbrands.com.br');
+\`\`\`
 
-A consulta precisa retornar exatamente um perfil com `role = 'admin'` e `is_active = true`. Não compartilhe senha neste repositório ou no chat.
+Não compartilhe senhas neste repositório ou no chat.
 
-## Criar e ativar usuários seguintes
-1. Crie o usuário em Authentication > Users.
-2. No SQL Editor, atribua um papel e ative somente após validar o e-mail:
+## Gestão de usuários
+- A tela administrativa fica em Configurações > Usuários e permissões.
+- Apenas administradores ativos podem listar contas, gerar convites, alterar papéis e ativar/desativar colaboradores.
+- O link de convite é gerado pelo Edge Function admin-users, exibido uma única vez e deve ser enviado por canal corporativo seguro.
+- O link não é armazenado em tabela ou log. A validade segue a configuração de expiração de e-mails do Supabase Auth.
+- A ativação só é permitida depois da confirmação do e-mail.
+- Papéis: admin (gestão total), gestor (gestão operacional e consultas de auditoria), operador (opera cadastros e processos) e consulta (somente leitura).
+- A própria conta administradora não pode ser rebaixada ou desativada pela tela.
+- O sistema mantém proteção transacional para impedir que duas ações simultâneas removam o último administrador ativo.
+- As contas são desativadas logicamente pelo campo is_active. Nenhum usuário, dado operacional ou histórico é apagado.
 
-```sql
-update public.user_profiles
-set role = 'operador',
-    is_active = true,
-    updated_at = now()
-where lower(email) = lower('EMAIL-DO-COLABORADOR')
-returning id, email, role, is_active;
-```
-
-Papéis:
-- `admin`: gestão total de perfis e dados operacionais.
-- `gestor`: leitura e operação dos dados; leitura de auditoria e eventos.
-- `operador`: cadastro e atualização de destinatários, pedidos e expedição.
-- `consulta`: leitura dos dados operacionais.
-
-## Recuperação de senha
-A tela de recuperação usa Supabase Auth. Para enviar e-mails de recuperação de forma confiável em produção, configure um SMTP próprio em Authentication > SMTP Settings e valide o domínio/remetente.
-
-## Variáveis no Render
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-
-A chave publishable pode estar no cliente, porque as políticas RLS protegem os dados. Nunca coloque chaves `service_role` ou `sb_secret` em variáveis `NEXT_PUBLIC_*` nem no Git.
+## Segurança e variáveis
+- O gateway da Edge Function exige JWT válido. A função valida novamente o usuário e exige role = admin e is_active = true.
+- A chave secreta Supabase é usada somente na Edge Function, nunca no navegador, nas variáveis NEXT_PUBLIC_* ou no repositório.
+- A função usa SUPABASE_SECRET_KEYS (chave nomeada default) ou, em ambientes legados, SUPABASE_SERVICE_ROLE_KEY.
+- No Render, mantenha apenas NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY para o cliente Supabase.
