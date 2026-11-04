@@ -167,3 +167,19 @@
 .recipient-form-grid select{width:100%;min-height:39px;padding:0 10px;border:1px solid #e2e6e4;border-radius:6px;background:#fff;color:#303638;font:inherit;font-size:11px}
 .recipient-form-grid select:focus{outline:0;border-color:#97a957;box-shadow:0 0 0 3px rgba(151,169,87,.12)}
 @media(max-width:760px){.orders-stats{grid-template-columns:1fr;gap:8px}.orders-welcome .primary-button{width:100%}.orders-table th,.orders-table td{padding:12px 10px}.orders-table td:first-child,.orders-table th:first-child{padding-left:14px}}
+/* Operational monitoring pages */
+.history-page,.billing-page,.shipping-page{width:100%}
+.history-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px;margin-bottom:17px}
+.history-access{display:inline-flex;align-items:center;gap:7px;padding:8px 11px;border:1px solid #e4ead7;border-radius:30px;background:#f5f8ee;color:#6f823d;font-size:9px;font-weight:800;letter-spacing:.04em;white-space:nowrap}
+.history-panel{overflow:hidden}
+.history-limit{color:#9ba2a4;font-size:9px}
+.history-list{display:flex;flex-direction:column}
+.history-event{display:flex;align-items:center;gap:13px;padding:16px 22px;border-top:1px solid #f0f1f1}
+.history-event-icon{display:grid;place-items:center;flex:0 0 36px;width:36px;height:36px;border-radius:10px;background:#f2f5eb;color:#738640}
+.history-event-fulfillment{background:#eef3f7;color:#668098}
+.history-event-main{min-width:0;flex:1}
+.history-event-main>strong{display:block;color:#394143;font-size:11px;font-weight:700}
+.history-event-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px;color:#9aa2a4;font-size:9px}
+.history-event time{display:flex;align-items:center;gap:6px;color:#929a9d;font-size:9px;white-space:nowrap}
+.history-footnote{margin:12px 2px 0;color:#9ba2a4;font-size:9px}
+@media(max-width:760px){.history-summary{grid-template-columns:1fr;gap:8px}.history-event{align-items:flex-start;padding:13px 14px}.history-event time{margin-left:auto;font-size:8px}.history-event-main>strong{line-height:1.45}.history-event-meta{font-size:8px}}
