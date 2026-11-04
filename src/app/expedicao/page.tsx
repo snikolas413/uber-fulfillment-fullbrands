@@ -4,15 +4,21 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
+type ShipmentRecord = { tracking_code: string | null; status: string; label_storage_path: string | null; freight_amount: number | null };
+type InvoiceRecord = { omie_invoice_number: string | null; access_key: string | null };
 type ShippingRow = {
   id: string;
   status: string;
   created_at: string;
   recipients: { full_name: string } | null;
   delivery_addresses: { city: string; state: string; postal_code: string } | null;
-  shipments: { tracking_code: string | null; status: string; label_storage_path: string | null; freight_amount: number | null }[] | null;
-  invoices: { omie_invoice_number: string | null; access_key: string | null }[] | null;
+  shipments: ShipmentRecord | ShipmentRecord[] | null;
+  invoices: InvoiceRecord | InvoiceRecord[] | null;
 };
+
+function firstRelation<T>(value: T | T[] | null | undefined): T | null {
+  return Array.isArray(value) ? value[0] ?? null : value ?? null;
+}
 
 function shippingLabel(status: string) {
   if (status === "billed") return "Faturado · aguardando expedição";
@@ -60,8 +66,8 @@ export default async function ShippingPage() {
           <div className="orders-table-wrap"><table className="orders-table">
             <thead><tr><th>DESTINATÁRIO</th><th>LOCAL DE ENTREGA</th><th>NF-E</th><th>RASTREAMENTO</th><th>STATUS</th></tr></thead>
             <tbody>{rows.map((row) => {
-              const shipment = row.shipments?.[0];
-              const invoice = row.invoices?.[0];
+              const shipment = firstRelation(row.shipments);
+              const invoice = firstRelation(row.invoices);
               const address = row.delivery_addresses;
               return <tr key={row.id}>
                 <td><strong>{row.recipients?.full_name ?? "Destinatário indisponível"}</strong><small>{new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(new Date(row.created_at))}</small></td>
