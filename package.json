@@ -2,7 +2,7 @@
   "name": "uber-fulfillment-fullbrands",
   "version": "0.1.0",
   "private": true,
-  "engines": { "node": ">=22.0.0" },
+  "engines": { "node": ">=22 <25" },
   "scripts": { "dev": "next dev", "build": "next build", "start": "next start", "lint": "eslint .", "typecheck": "tsc --noEmit" },
   "dependencies": {
     "@supabase/ssr": "^0.7.0",
