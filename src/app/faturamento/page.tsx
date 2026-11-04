@@ -4,14 +4,19 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
+type InvoiceRecord = { omie_invoice_number: string | null; access_key: string | null; status: string; issued_at: string | null };
 type BillingRow = {
   id: string;
   status: string;
   omie_order_number: string | null;
   created_at: string;
   recipients: { full_name: string } | null;
-  invoices: { omie_invoice_number: string | null; access_key: string | null; status: string; issued_at: string | null }[] | null;
+  invoices: InvoiceRecord | InvoiceRecord[] | null;
 };
+
+function firstRelation<T>(value: T | T[] | null | undefined): T | null {
+  return Array.isArray(value) ? value[0] ?? null : value ?? null;
+}
 
 function statusLabel(status: string) {
   if (status === "order_created") return "Pedido criado no Omie";
@@ -64,7 +69,7 @@ export default async function BillingPage() {
           <div className="orders-table-wrap"><table className="orders-table">
             <thead><tr><th>DESTINATÁRIO</th><th>PEDIDO OMIE</th><th>STATUS</th><th>NF-E</th><th>EMISSÃO</th></tr></thead>
             <tbody>{rows.map((row) => {
-              const invoice = row.invoices?.[0];
+              const invoice = firstRelation(row.invoices);
               return <tr key={row.id}>
                 <td><strong>{row.recipients?.full_name ?? "Destinatário indisponível"}</strong><small>{formatDate(row.created_at)}</small></td>
                 <td>{row.omie_order_number ? `#${row.omie_order_number}` : "Aguardando número Omie"}</td>
