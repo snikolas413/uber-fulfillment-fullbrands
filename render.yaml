@@ -18,6 +18,10 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      - key: OMIE_APP_KEY
+        sync: false
+      - key: OMIE_APP_SECRET
+        sync: false
       - key: OMIE_APP_HASH
         sync: false
       - key: OMIE_ACCESS_TOKEN
@@ -25,4 +29,8 @@ services:
       - key: OMIE_REFRESH_TOKEN
         sync: false
       - key: OMIE_ACCESS_TOKEN_ISSUED_AT
+        sync: false
+      - key: OMIE_API_BASE_URL
+        value: https://app.omie.com.br/api/v1
+      - key: APP_BASE_URL
         sync: false
