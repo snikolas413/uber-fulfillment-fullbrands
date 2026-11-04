@@ -93,7 +93,7 @@ export default async function BillingPage() {
     <div className="billing-page">
       <section className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line" /> CONTROLE FISCAL</div><h1>Faturamento</h1><p className="page-lead">Confira as preparações e acompanhe os pedidos encaminhados ao Omie e suas informações de NF-e.</p></div><span className="history-access"><ShieldCheck size={14} /> Consulta</span></section>
       <section className="orders-notice"><div className="orders-notice-icon"><Clock3 size={17} /></div><div><strong>Integração fiscal em preparação</strong><p>As preparações locais aparecem abaixo para conferência. A criação do pedido no Omie e a emissão de NF-e continuam bloqueadas até a validação dos parâmetros comerciais/fiscais e das credenciais da aplicação.</p></div></section>
-      <section className="orders-stats" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
+      <section className="orders-stats billing-stats">
         <article className="recipient-stat"><span className="recipient-stat-icon"><ClipboardCheck size={17} /></span><div><strong>{preparedRows.length + rows.length}</strong><small>Registros acompanhados</small></div></article>
         <article className="recipient-stat"><span className="recipient-stat-icon"><Package size={17} /></span><div><strong>{preparedRows.length}</strong><small>Aguardando integração Omie</small></div></article>
         <article className="recipient-stat"><span className="recipient-stat-icon"><Clock3 size={17} /></span><div><strong>{pending}</strong><small>Pendentes de faturamento</small></div></article>
