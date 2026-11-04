@@ -16,7 +16,7 @@ export default async function DashboardPage() {
  if (authData.user) {
   const [recipients, orders, billing, shipped] = await Promise.all([
    supabase.from("recipients").select("id", { count: "exact", head: true }),
-   supabase.from("fulfillments").select("id", { count: "exact", head: true }).not("omie_order_id", "is", null),
+   supabase.from("fulfillments").select("id", { count: "exact", head: true }).neq("status", "cancelled"),
    supabase.from("fulfillments").select("id", { count: "exact", head: true }).in("status", ["order_created", "billing_pending"]),
    supabase.from("fulfillments").select("id", { count: "exact", head: true }).eq("status", "shipped"),
   ]);
@@ -29,7 +29,7 @@ export default async function DashboardPage() {
 
  const metrics = [
   { label:"Destinatários cadastrados", value:String(recipientsCount), note:"Base de motoristas", icon:Users },
-  { label:"Pedidos criados", value:String(ordersCount), note:"Pedidos registrados no Omie", icon:FilePlus2 },
+  { label:"Pedidos preparados", value:String(ordersCount), note:"Rascunhos e pedidos registrados", icon:FilePlus2 },
   { label:"Aguardando faturamento", value:String(billingCount), note:"Pedidos aguardando NF-e", icon:ClipboardCheck },
   { label:"Envios concluídos", value:String(shippedCount), note:"Pedidos marcados como enviados", icon:PackageCheck }
  ];
