@@ -19,9 +19,7 @@ function redirectWithCookies(request: NextRequest, response: NextResponse, desti
   url.pathname = destination;
   url.search = "";
   const redirectResponse = NextResponse.redirect(url);
-  for (const cookie of response.cookies.getAll()) {
-    redirectResponse.cookies.set(cookie);
-  }
+  for (const cookie of response.cookies.getAll()) redirectResponse.cookies.set(cookie);
   return redirectResponse;
 }
 
@@ -35,23 +33,14 @@ export async function updateSession(request: NextRequest) {
   }
 
   let supabaseResponse = NextResponse.next({ request });
-
   const supabase = createServerClient(supabaseUrl, publishableKey, {
     cookies: {
-      getAll() {
-        return request.cookies.getAll();
-      },
+      getAll() { return request.cookies.getAll(); },
       setAll(cookiesToSet, headers) {
         cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
         supabaseResponse = NextResponse.next({ request });
-        cookiesToSet.forEach(({ name, value, options }) => {
-          supabaseResponse.cookies.set(name, value, options);
-        });
-        if (headers) {
-          Object.entries(headers).forEach(([name, value]) => {
-            supabaseResponse.headers.set(name, value);
-          });
-        }
+        cookiesToSet.forEach(({ name, value, options }) => supabaseResponse.cookies.set(name, value, options));
+        if (headers) Object.entries(headers).forEach(([name, value]) => supabaseResponse.headers.set(name, value));
       },
     },
   });
@@ -66,9 +55,7 @@ export async function updateSession(request: NextRequest) {
       : redirectWithCookies(request, supabaseResponse, "/login");
   }
 
-  if (pathname === "/auth/callback" || pathname === "/acesso-negado") {
-    return supabaseResponse;
-  }
+  if (pathname === "/auth/callback" || pathname === "/acesso-negado") return supabaseResponse;
 
   const { data: profile, error: profileError } = await supabase
     .from("user_profiles")
@@ -77,12 +64,13 @@ export async function updateSession(request: NextRequest) {
     .maybeSingle();
 
   if (profileError || !profile?.is_active) {
+    // A valid invitation/recovery session may set a password before an administrator activates the account.
+    if (pathname === "/redefinir-senha") return supabaseResponse;
     return redirectWithCookies(request, supabaseResponse, "/acesso-negado");
   }
 
   if (pathname === "/login" || pathname === "/esqueci-senha") {
     return redirectWithCookies(request, supabaseResponse, "/");
   }
-
   return supabaseResponse;
 }
