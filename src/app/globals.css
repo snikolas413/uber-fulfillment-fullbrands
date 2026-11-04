@@ -187,3 +187,16 @@
 /* Billing queue: four metrics on desktop, stacked on small screens */
 .billing-stats{grid-template-columns:repeat(4,minmax(0,1fr))}
 @media(max-width:760px){.billing-stats{grid-template-columns:1fr}}
+
+
+/* Omie operation controls */
+.omie-action-wrap{display:inline-flex;flex-direction:column;align-items:flex-start;gap:5px;max-width:250px;vertical-align:middle}
+.omie-action-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:34px;padding:0 11px;border:1px solid #dfe5d4;border-radius:7px;background:#f6f8f0;color:#596d2e;font:inherit;font-size:10px;font-weight:700;white-space:nowrap;cursor:pointer}
+.omie-action-button:hover{border-color:#b9c99a;background:#eff4e5}
+.omie-action-button:disabled{opacity:.6;cursor:wait}
+.omie-action-button-small{min-height:29px;padding:0 8px;font-size:9px}
+.omie-action-result{display:block;max-width:250px;font-size:9px;line-height:1.4;white-space:normal}
+.omie-action-result-success{color:#577b3d}
+.omie-action-result-warning{color:#987536}
+.omie-action-result-error{color:#a2483e}
+@media(max-width:760px){.omie-action-wrap{max-width:180px}.omie-action-button{white-space:normal;text-align:left}}
