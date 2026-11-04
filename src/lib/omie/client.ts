@@ -149,7 +149,7 @@ async function refreshCredentials(force = false): Promise<StoredOmieCredentials>
       return current;
     }
 
-    const endpoint = \`https://app.omie.com.br/api/portal/apps/\${encodeURIComponent(current.appHash)}/refresh-token/\`;
+    const endpoint = `https://app.omie.com.br/api/portal/apps/${encodeURIComponent(current.appHash)}/refresh-token/`;
     let response: Response;
 
     try {
@@ -171,7 +171,7 @@ async function refreshCredentials(force = false): Promise<StoredOmieCredentials>
     if (!response.ok || !body || body.faultstring) {
       const message = typeof body?.faultstring === "string"
         ? body.faultstring
-        : \`O Omie recusou a renovação do token (HTTP \${response.status}).\`;
+        : `O Omie recusou a renovação do token (HTTP ${response.status}).`;
       throw new OmieApiError(message, typeof body?.faultcode === "string" ? body.faultcode : undefined, response.status);
     }
 
@@ -208,10 +208,10 @@ async function requestOmie(
   params: Record<string, unknown>,
   accessToken: string,
 ): Promise<{ response: Response; payload: OmiePayload | null }> {
-  const response = await fetch(\`\${OMIE_API_BASE_URL}\${endpoint}\`, {
+  const response = await fetch(`${OMIE_API_BASE_URL}${endpoint}`, {
     method: "POST",
     headers: {
-      Authorization: \`Bearer \${accessToken}\`,
+      Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
       Accept: "application/json",
     },
@@ -249,7 +249,7 @@ export async function callOmie<T extends Record<string, unknown>>(
     throw new OmieApiError(
       typeof result.payload?.faultstring === "string"
         ? result.payload.faultstring
-        : \`O Omie respondeu com HTTP \${result.response.status}.\`,
+        : `O Omie respondeu com HTTP ${result.response.status}.`,
       typeof result.payload?.faultcode === "string" ? result.payload.faultcode : undefined,
       result.response.status,
     );
