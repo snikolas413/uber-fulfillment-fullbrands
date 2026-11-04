@@ -48,8 +48,8 @@ export default async function ShippingPage() {
     .limit(100);
 
   const rows = (data ?? []) as unknown as ShippingRow[];
-  const withTracking = rows.filter((row) => Boolean(row.shipments?.[0]?.tracking_code)).length;
-  const labelsReady = rows.filter((row) => Boolean(row.shipments?.[0]?.label_storage_path)).length;
+  const withTracking = rows.filter((row) => Boolean(firstRelation(row.shipments)?.tracking_code)).length;
+  const labelsReady = rows.filter((row) => Boolean(firstRelation(row.shipments)?.label_storage_path)).length;
 
   return (
     <div className="shipping-page">
