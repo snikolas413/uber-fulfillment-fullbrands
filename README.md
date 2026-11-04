@@ -2,7 +2,7 @@
 
 Aplicação interna para gestão da operação de fulfillment da Uber: cadastro de motoristas, preparação de pedidos, faturamento, expedição e rastreabilidade.
 
-## Preview
+## Produção
 https://uber-fulfillment-fullbrands.onrender.com
 
 ## Tecnologia
@@ -11,7 +11,7 @@ https://uber-fulfillment-fullbrands.onrender.com
 - Omie ERP, integração exclusivamente server-side
 - Render para hospedagem
 
-## Módulos implementados no branch de evolução
+## Módulos
 - Dashboard com indicadores do banco
 - Destinatários: cadastro, edição, busca e histórico de endereços
 - Pedidos: preparação local e envio controlado ao Omie, com PO, endereço físico do motorista e e-mail da NF-e
@@ -54,15 +54,12 @@ npm run build
 - `OMIE_REFRESH_TOKEN`
 - `OMIE_ACCESS_TOKEN_ISSUED_AT` (ISO 8601)
 - `OMIE_API_BASE_URL` (opcional)
+- `APP_BASE_URL` (opcional)
 
-As credenciais Omie próprias da aplicação ainda precisam ser configuradas no serviço Render antes de habilitar operações externas. A conexão do Omie disponível no ambiente de desenvolvimento não é herdada pelo app publicado.
+As credenciais Omie próprias da aplicação precisam estar configuradas no serviço Render antes de habilitar operações externas. A conexão do Omie disponível no ambiente de desenvolvimento não é herdada pelo app publicado.
 
-## Próximos bloqueios antes de produção
-1. Aplicar as migrations pendentes em ambiente de teste Supabase.
-2. Validar cadastro, edição, versionamento de endereço e preparação de pedido com a conta admin.
-3. Configurar e testar as credenciais Omie server-side.
-4. Configurar credenciais próprias da aplicação Omie no Render.
-5. Confirmar os parâmetros fiscais/comerciais e executar um primeiro pedido assistido.
-6. Validar sincronização da NF-e e sincronização do frete/rastreio que o Omie já recebeu dos Correios.
-
-Não mesclar ou publicar as mudanças deste branch antes da validação do banco e do fluxo integrado.
+## Estado das integrações
+- As migrations de e-mail, Vault e metadados foram aplicadas no projeto Supabase conectado em 04/11/2026 e verificadas.
+- A integração Correios continua dentro do Omie; este aplicativo não utiliza uma API paralela dos Correios.
+- Ações externas do Omie exigem credenciais próprias da aplicação e validação fiscal/comercial antes do primeiro pedido real.
+- Faturamento e expedição devem ser testados de forma assistida. Não execute faturamento real sem conferir o pedido e confirmar a ação.
