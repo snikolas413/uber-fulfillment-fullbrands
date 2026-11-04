@@ -54,6 +54,7 @@ function isNotFound(error: unknown) {
   const message = error instanceof Error ? error.message.toLocaleLowerCase("pt-BR") : "";
   const code = error instanceof OmieApiError ? (error.code ?? "").toLocaleLowerCase("pt-BR") : "";
   return message.includes("não encontrado") || message.includes("nao encontrado") ||
+    message.includes("não cadastrado") || message.includes("nao cadastrado") ||
     message.includes("not found") || code.includes("not_found") || code.includes("nao_encontrado");
 }
 async function context() {
