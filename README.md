@@ -1,15 +1,25 @@
 # Uber Fulfillment | SuppleyTech · FULL BRANDS
 
-Aplicação interna para cadastro de destinatários, gestão de pedidos, faturamento, expedição e rastreabilidade da operação Uber.
+Aplicação interna para gestão da operação de fulfillment da Uber: cadastro de motoristas, preparação de pedidos, faturamento, expedição e rastreabilidade.
 
-## Acesso ao preview
+## Preview
 https://uber-fulfillment-fullbrands.onrender.com
 
 ## Tecnologia
-- Next.js 16 + React + TypeScript
-- PostgreSQL/Supabase com RLS e autenticação
-- API Omie exclusivamente no backend
+- Next.js 16, React 19 e TypeScript
+- PostgreSQL/Supabase, autenticação e Row Level Security (RLS)
+- Omie ERP, integração exclusivamente server-side
 - Render para hospedagem
+
+## Módulos implementados no branch de evolução
+- Dashboard com indicadores do banco
+- Destinatários: cadastro, edição, busca e histórico de endereços
+- Pedidos: preparação local, um destinatário por pedido, endereço de entrega, Purchase Order, quantidade e valor
+- Faturamento: acompanhamento da fila e dados de NF-e em modo somente leitura
+- Expedição: acompanhamento de documentos, etiquetas e rastreio em modo somente leitura
+- Histórico: consulta de auditoria para perfis admin e gestor
+
+A preparação de pedidos grava um rascunho operacional no Supabase. **Ainda não envia pedidos ao Omie, não emite NF-e e não gera etiquetas dos Correios.**
 
 ## Executar localmente
 ```bash
@@ -18,43 +28,39 @@ npm install
 npm run dev
 ```
 
-## Módulos
-- Dashboard operacional
-- Cadastro manual de destinatários e endereços
-- Preparação e acompanhamento de pedidos
-- Faturamento em lote com prévia e confirmação
-- Etiquetas, documentos fiscais e expedição
-- Histórico e auditoria
-
-## Segurança e acesso
-- O aplicativo não oferece cadastro público.
-- Cada novo usuário começa inativo e sem acesso até ser aprovado por um administrador.
-- Autenticação por e-mail/senha Supabase; sessão validada no proxy do Next.js.
-- RLS aplicada em todas as tabelas públicas; papéis: admin, gestor, operador e consulta.
-- Credenciais privadas Omie e chaves Supabase secret/service role nunca são enviadas ao navegador.
-- Instruções para criar o primeiro administrador: [docs/auth-and-access.md](docs/auth-and-access.md).
-- Não cadastrar dados reais até concluir o primeiro administrador e configurar SMTP/URL de recuperação.
-- Repositório público conforme decisão do responsável; não incluir segredos, chaves ou dados pessoais.
-
-## Configuração de ambiente
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-- `OMIE_APP_KEY`, `OMIE_APP_SECRET`, `OMIE_APP_HASH`
-
-O identificador da empresa Omie já está configurado no Render; as credenciais de API ainda precisam ser adicionadas pelo responsável.
-
-## Estrutura
-- `src/app`: páginas e rotas
-- `src/components`: interface
-- `src/lib/omie`: cliente server-side Omie
-- `src/lib/supabase`: clientes e sessão
-- `supabase/migrations`: histórico do schema
-- `docs`: arquitetura, dados, identidade e configuração de acesso
-- `public/brand`: arquivos oficiais da marca
-
-## Validar
+## Verificações
+GitHub Actions executa automaticamente:
 ```bash
 npm run typecheck
 npm run lint
 npm run build
 ```
+
+## Segurança
+- Autenticação por e-mail e senha do Supabase.
+- Perfis internos e estado de ativação validados no servidor.
+- RLS habilitada nas tabelas expostas.
+- Operações de gravação usam RPCs `SECURITY INVOKER`, validação do perfil e trilha de auditoria.
+- Endereços são versionados: editar o endereço cria nova versão e preserva referências de pedidos existentes.
+- Credenciais Omie e chaves Supabase privadas nunca podem ser colocadas em `NEXT_PUBLIC_*` ou no repositório.
+- O histórico de auditoria é somente leitura na aplicação.
+
+## Configuração de ambiente
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+- `OMIE_APP_KEY`
+- `OMIE_APP_SECRET`
+- `OMIE_APP_HASH`
+- `OMIE_API_BASE_URL` (opcional)
+
+As credenciais Omie próprias da aplicação ainda precisam ser configuradas no serviço Render antes de habilitar operações externas. A conexão do Omie disponível no ambiente de desenvolvimento não é herdada pelo app publicado.
+
+## Próximos bloqueios antes de produção
+1. Aplicar as migrations pendentes em ambiente de teste Supabase.
+2. Validar cadastro, edição, versionamento de endereço e preparação de pedido com a conta admin.
+3. Configurar e testar as credenciais Omie server-side.
+4. Confirmar preço, etapa inicial, condição de pagamento e cenário fiscal com a área responsável.
+5. Validar contrato/serviço dos Correios, geração de etiqueta e tratamento de retorno.
+6. Habilitar faturamento e expedição somente depois dos testes integrados.
+
+Não mesclar ou publicar as mudanças deste branch antes da validação do banco e do fluxo integrado.
