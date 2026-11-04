@@ -16,9 +16,13 @@ services:
         sync: false
       - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
         sync: false
-      - key: OMIE_APP_KEY
-        sync: false
-      - key: OMIE_APP_SECRET
+      - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: OMIE_APP_HASH
+        sync: false
+      - key: OMIE_ACCESS_TOKEN
+        sync: false
+      - key: OMIE_REFRESH_TOKEN
+        sync: false
+      - key: OMIE_ACCESS_TOKEN_ISSUED_AT
         sync: false
