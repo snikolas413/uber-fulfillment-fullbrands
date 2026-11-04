@@ -55,7 +55,7 @@ export async function prepareOrderAction(
     if (purchaseOrder.length > 30) {
       return { status: "error", message: "A referência do pedido de compra aceita até 30 caracteres." };
     }
-    if (customerEmail.length > 160 || (customerEmail && !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(customerEmail))) {
+    if (customerEmail.length > 160 || (customerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail))) {
       return { status: "error", message: "Informe um e-mail válido para o envio da NF-e." };
     }
 
