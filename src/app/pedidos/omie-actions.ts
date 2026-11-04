@@ -285,11 +285,23 @@ export async function invoiceOrderAction(id: string): Promise<OmieActionResult> 
       codigo_pedido: row.omie_order_id, cCodIntPed: integrationId,
     });
     if (validation.faultstring) return { status: "warning", message: String(validation.faultstring) };
+    if (String(validation.cCodStatus ?? "") !== "0") {
+      return {
+        status: "warning",
+        message: String(validation.cDescStatus ?? "O Omie não confirmou a pré-validação do pedido. Nenhum faturamento foi solicitado."),
+      };
+    }
 
     const result = await callOmie<Record<string, unknown>>("/produtos/pedidovendafat/", "FaturarPedidoVenda", {
       cCodIntPed: integrationId, nCodPed: row.omie_order_id,
     });
     if (result.faultstring) return { status: "warning", message: String(result.faultstring) };
+    if (String(result.cCodStatus ?? "") !== "0") {
+      return {
+        status: "warning",
+        message: String(result.cDescStatus ?? "O Omie não confirmou o faturamento. Consulte o status antes de tentar novamente."),
+      };
+    }
     const status = await statusFromOmie(row);
     const reconciled = await reconcile(supabase, userId, row, status);
     await audit(supabase, userId, row.id, "omie.invoice.requested", {
