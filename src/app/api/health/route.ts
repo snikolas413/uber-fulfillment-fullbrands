@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
-
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const supabasePublicConfigured = Boolean(
+  const supabaseClientConfigured = Boolean(
     process.env.NEXT_PUBLIC_SUPABASE_URL &&
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
   );
@@ -18,10 +17,9 @@ export async function GET() {
     application: "uber-fulfillment-fullbrands",
     timestamp: new Date().toISOString(),
     integrations: {
-      supabasePublicClientConfigured: supabasePublicConfigured,
-      supabaseAuthenticationConfigured: false,
+      supabaseClientConfigured,
       omieCredentialsPresent,
     },
-    mode: "preview",
+    mode: "internal-preview",
   });
 }
