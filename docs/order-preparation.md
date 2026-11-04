@@ -26,5 +26,5 @@ A cotação, etiqueta e postagem dos Correios seguem dentro do Omie, cuja integr
 
 ## Configuração ainda necessária
 - Credenciais próprias do app Omie (app_hash, access token, refresh token e timestamp ISO do primeiro token) no Render.
-- Migrations de e-mail, Vault e metadados aplicadas no ambiente de desenvolvimento.
-- Teste assistido de inclusão, sincronização, faturamento e leitura de expedição antes da publicação.
+- Confirmação fiscal/comercial dos parâmetros de venda e faturamento antes do primeiro pedido real.
+- Teste assistido de inclusão, sincronização, faturamento e leitura de expedição após o deploy. Não execute faturamento real sem conferência e confirmação explícita.
