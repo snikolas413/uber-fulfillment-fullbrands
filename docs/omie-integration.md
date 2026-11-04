@@ -49,15 +49,14 @@ O faturamento é uma ação distinta de criação do pedido. A tela exige confir
 A equipe usa a integração Correios já configurada dentro do Omie para cotação, emissão da etiqueta e postagem. Depois dessa operação, o app chama apenas `ConsultarPedido` no Omie e copia para o banco local o que o ERP já registrou: transportadora, serviço/modalidade, frete, volumes, código de rastreio, link e previsão de entrega. A aplicação não gera etiquetas nem chama diretamente os Correios.
 
 ## Migrations
-As migrations adicionadas nesta PR devem ser aplicadas em ambiente isolado antes do deploy:
+As migrations abaixo foram aplicadas ao projeto Supabase conectado em 04/11/2026, sem criar branch adicional:
 - `20261104130000_prepare_uber_fulfillment_customer_email.sql`
 - `20261104140000_omie_credentials_and_sync_metadata.sql`
 
-A segunda cria funções Vault restritas à service role, campos de controle de sincronização e metadados para documentos e frete.
+A validação confirmou as colunas de e-mail, sincronização, DANFE e frete; a função de preparação com a nova assinatura; e que as funções Vault só podem ser executadas por `service_role` (sem execução por `anon` ou `authenticated`). Nenhum dado de negócio foi apagado ou atualizado por essas migrations.
 
 ## Bloqueios antes do primeiro uso real
 - Configurar credenciais próprias da aplicação no Render, incluindo data/hora ISO de emissão do primeiro token.
-- Aplicar e validar as migrations em banco de desenvolvimento.
 - Confirmar com o responsável fiscal o cenário, CFOP, preço, parcela, categoria, conta, flags de estoque/financeiro e os dados de destino.
 - Fazer o primeiro pedido com supervisão do operador, depois testar consulta e conciliação.
 - O botão de faturamento pode emitir NF-e real e exige confirmação explícita.
