@@ -96,13 +96,13 @@ function bootstrapCredentialsFromEnvironment(): StoredOmieCredentials {
   const refreshToken = process.env.OMIE_REFRESH_TOKEN?.trim();
   const issuedAt = process.env.OMIE_ACCESS_TOKEN_ISSUED_AT?.trim();
 
-  if (!appHash || !accessToken || !refreshToken) {
+  if (!appHash || !accessToken || !refreshToken || !issuedAt) {
     throw new OmieConfigurationError(
-      "Configure OMIE_APP_HASH, OMIE_ACCESS_TOKEN e OMIE_REFRESH_TOKEN no ambiente do servidor. As chaves antigas App Key/App Secret não são usadas pela autenticação atual.",
+      "Configure OMIE_APP_HASH, OMIE_ACCESS_TOKEN, OMIE_REFRESH_TOKEN e OMIE_ACCESS_TOKEN_ISSUED_AT no ambiente do servidor. Informe o instante de emissão do par de tokens em ISO 8601. As chaves antigas App Key/App Secret não são usadas pela autenticação atual.",
     );
   }
 
-  const issuedAtMs = issuedAt ? Date.parse(issuedAt) : Date.now();
+  const issuedAtMs = Date.parse(issuedAt);
   if (!Number.isFinite(issuedAtMs)) {
     throw new OmieConfigurationError("OMIE_ACCESS_TOKEN_ISSUED_AT deve ser uma data ISO válida.");
   }
