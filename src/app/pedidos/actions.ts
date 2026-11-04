@@ -8,8 +8,6 @@ export type OrderActionState = {
   message: string;
 };
 
-const initialState: OrderActionState = { status: "idle", message: "" };
-
 export async function prepareOrderAction(
   _previousState: OrderActionState,
   formData: FormData,
@@ -101,4 +99,3 @@ export async function prepareOrderAction(
   }
 }
 
-export const orderInitialState = initialState;
