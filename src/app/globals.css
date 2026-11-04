@@ -183,3 +183,7 @@
 .history-event time{display:flex;align-items:center;gap:6px;color:#929a9d;font-size:9px;white-space:nowrap}
 .history-footnote{margin:12px 2px 0;color:#9ba2a4;font-size:9px}
 @media(max-width:760px){.history-summary{grid-template-columns:1fr;gap:8px}.history-event{align-items:flex-start;padding:13px 14px}.history-event time{margin-left:auto;font-size:8px}.history-event-main>strong{line-height:1.45}.history-event-meta{font-size:8px}}
+
+/* Billing queue: four metrics on desktop, stacked on small screens */
+.billing-stats{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media(max-width:760px){.billing-stats{grid-template-columns:1fr}}
