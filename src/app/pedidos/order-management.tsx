@@ -176,7 +176,7 @@ export function OrderManagement({
                       <td><strong>{item?.description ?? "Produto não informado"}</strong><small>{item?.product_code ?? "Sem código"} · {item?.quantity ?? 0} un.</small></td>
                       <td>{draft.customer_purchase_order || "Não informada"}</td>
                       <td><span className="orders-address"><MapPin size={12} />{draft.delivery_addresses ? `${draft.delivery_addresses.city}/${draft.delivery_addresses.state} · ${draft.delivery_addresses.postal_code}` : "Sem endereço"}</span></td>
-                      <td>{draft.customer_email || draft.recipients?.email || "Não informado"}</td>
+                      <td>{draft.customer_email || "Não informado"}</td>
                       <td><strong>{formatCurrency(Number(item?.line_total ?? Number(item?.quantity ?? 0) * Number(item?.unit_price ?? 0)))}</strong></td>
                       <td><span className={`order-status order-status-${draft.status}`}>{statusLabel(draft.status)}</span></td>
                       <td><span className="orders-date"><Clock3 size={12} />{formatDate(draft.created_at)}</span></td>
