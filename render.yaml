@@ -24,3 +24,5 @@ services:
         sync: false
       - key: OMIE_REFRESH_TOKEN
         sync: false
+      - key: OMIE_ACCESS_TOKEN_ISSUED_AT
+        sync: false
