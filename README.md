@@ -15,7 +15,7 @@ https://uber-fulfillment-fullbrands.onrender.com
 - Dashboard com indicadores do banco
 - Destinatários: cadastro, edição, busca e histórico de endereços
 - Pedidos: preparação local, um destinatário por pedido, endereço de entrega, Purchase Order, quantidade, valor e e-mail de NF-e copiado para o pedido
-- Faturamento: acompanhamento da fila e dados de NF-e em modo somente leitura
+- Faturamento: pré-conferência das preparações locais e acompanhamento da fila e dados de NF-e em modo somente leitura
 - Expedição: acompanhamento de documentos, etiquetas e rastreio em modo somente leitura
 - Histórico: consulta de auditoria para perfis admin e gestor
 
