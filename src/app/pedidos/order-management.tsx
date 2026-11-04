@@ -6,7 +6,8 @@ import {
   Plus, ClipboardList, Search, MapPin, Package, Clock3, FileText,
   ShieldCheck, X, LoaderCircle, AlertCircle, ChevronRight
 } from "lucide-react";
-import { orderInitialState, prepareOrderAction, type OrderActionState } from "./actions";
+import { orderInitialState, prepareOrderAction } from "./actions";
+import { OmieActionButton } from "@/components/omie-action-button";
 
 type Address = {
   id: string;
@@ -146,8 +147,8 @@ export function OrderManagement({
       <section className="orders-notice">
         <div className="orders-notice-icon"><AlertCircle size={17} /></div>
         <div>
-          <strong>Modo de preparação local</strong>
-          <p>Os pedidos desta tela ficam registrados no Supabase. Nenhum pedido, faturamento ou documento fiscal é enviado ao Omie nesta etapa.</p>
+          <strong>Integração Omie com ações controladas</strong>
+          <p>Prepare o pedido localmente e use “Enviar ao Omie” quando os dados estiverem conferidos. A ação cria um pedido real no ERP; faturamento e emissão da NF-e permanecem em uma etapa separada.</p>
         </div>
       </section>
 
@@ -166,7 +167,7 @@ export function OrderManagement({
         {visibleDrafts.length ? (
           <div className="orders-table-wrap">
             <table className="orders-table">
-              <thead><tr><th>DESTINATÁRIO</th><th>PRODUTO</th><th>REFERÊNCIA</th><th>ENDEREÇO</th><th>E-MAIL NF-E</th><th>TOTAL</th><th>STATUS</th><th>CRIADO EM</th></tr></thead>
+              <thead><tr><th>DESTINATÁRIO</th><th>PRODUTO</th><th>REFERÊNCIA</th><th>ENDEREÇO</th><th>E-MAIL NF-E</th><th>TOTAL</th><th>STATUS</th><th>CRIADO EM</th><th>OMIE</th></tr></thead>
               <tbody>
                 {visibleDrafts.map((draft) => {
                   const item = draft.fulfillment_items?.[0];
@@ -180,6 +181,7 @@ export function OrderManagement({
                       <td><strong>{formatCurrency(Number(item?.line_total ?? Number(item?.quantity ?? 0) * Number(item?.unit_price ?? 0)))}</strong></td>
                       <td><span className={`order-status order-status-${draft.status}`}>{statusLabel(draft.status)}</span></td>
                       <td><span className="orders-date"><Clock3 size={12} />{formatDate(draft.created_at)}</span></td>
+                      <td>{canWrite && draft.status === "ready" && <OmieActionButton fulfillmentId={draft.id} kind="send" size="small" />}{canWrite && (draft.status === "order_pending" || draft.status === "error") && <OmieActionButton fulfillmentId={draft.id} kind="send" size="small" />}{canWrite && ["order_created", "billing_pending", "billed"].includes(draft.status) && <OmieActionButton fulfillmentId={draft.id} kind="sync-order" size="small" />}{!canWrite && "Somente consulta"}</td>
                     </tr>
                   );
                 })}
@@ -195,7 +197,7 @@ export function OrderManagement({
             {!search && !readyRecipients.length && <small className="orders-empty-hint">Cadastre um destinatário com endereço antes de avançar.</small>}
           </div>
         )}
-        <div className="recipient-table-footer"><span>{visibleDrafts.length} de {drafts.length} preparação(ões)</span><span>Preço e dados fiscais precisam ser conferidos antes do envio ao ERP.</span></div>
+        <div className="recipient-table-footer"><span>{visibleDrafts.length} de {drafts.length} preparação(ões)</span><span>O envio cria um pedido real no Omie. O faturamento exige confirmação separada.</span></div>
       </section>
 
       {modalKey && (
