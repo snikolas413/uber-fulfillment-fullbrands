@@ -19,7 +19,6 @@ export default function ResetPasswordPage() {
     event.preventDefault();
     setMessage("");
     setErrorMessage("");
-
     if (password.length < 12) {
       setErrorMessage("Use uma senha com pelo menos 12 caracteres.");
       return;
@@ -32,18 +31,34 @@ export default function ResetPasswordPage() {
     setLoading(true);
     try {
       const supabase = createSupabaseBrowserClient();
-      const { error } = await supabase.auth.updateUser({ password });
-      if (error) {
-        setErrorMessage("Não foi possível atualizar a senha. Solicite um novo link de recuperação.");
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData.user) {
+        setErrorMessage("O link não está mais válido. Solicite um novo convite ou recuperação de senha.");
         return;
       }
-      setMessage("Senha alterada. Você já pode entrar com a nova senha.");
+
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) {
+        setErrorMessage("Não foi possível atualizar a senha. Solicite um novo link.");
+        return;
+      }
+
+      const { data: profile } = await supabase
+        .from("user_profiles")
+        .select("is_active")
+        .eq("id", authData.user.id)
+        .maybeSingle();
+
+      setMessage(profile?.is_active
+        ? "Senha atualizada. Você já pode entrar com a nova senha."
+        : "Senha definida. Seu acesso operacional depende da liberação do administrador.");
       setPassword("");
       setConfirmPassword("");
+      await supabase.auth.signOut();
       window.setTimeout(() => {
         router.replace("/login");
         router.refresh();
-      }, 1200);
+      }, 1800);
     } catch {
       setErrorMessage("Não foi possível conectar ao serviço de autenticação.");
     } finally {
