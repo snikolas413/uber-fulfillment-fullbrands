@@ -4,12 +4,25 @@
 O aplicativo conversa exclusivamente com a API do Omie no servidor Next.js. O Omie continua sendo o sistema de registro para pedido, faturamento, documentos fiscais e expedição. A integração dos Correios já configurada dentro do Omie permanece responsável por cotação, etiqueta e postagem. O aplicativo não chama uma API externa dos Correios.
 
 ## Autenticação e segredos
+O cliente server-side aceita dois modelos de autenticação:
+
+### Modelo tradicional, App Key e App Secret
+- Configure `OMIE_APP_KEY` e `OMIE_APP_SECRET` como variáveis privadas no Render.
+- As duas credenciais são enviadas somente no corpo da chamada server-side da API Omie, nos campos `app_key` e `app_secret`.
+- O App Key e App Secret precisam pertencer ao aplicativo Omie correto, FULL SERVICE TRADING LTDA.
+- Quando as duas variáveis estão configuradas, o cliente usa o modelo tradicional e não tenta ler tokens do Supabase Vault.
+- Não redefina a App Secret sem planejar a atualização de todos os sistemas que utilizam a chave atual.
+
+### Modelo Bearer, token de aplicativo
 - A API é chamada server-side com `Authorization: Bearer <access_token>`.
 - O access token é renovado pelo endpoint oficial de refresh usando o `app_hash`, token atual e refresh token.
 - O par de tokens rotativo é armazenado no Supabase Vault por funções acessíveis somente com `service_role`.
-- Os valores iniciais são carregados uma única vez do ambiente privado do Render e transferidos ao Vault. O código não registra tokens nem credenciais em logs.
-- A aplicação exige `OMIE_APP_HASH`, `OMIE_ACCESS_TOKEN`, `OMIE_REFRESH_TOKEN` e `OMIE_ACCESS_TOKEN_ISSUED_AT` no primeiro bootstrap.
-- A conexão Omie usada durante desenvolvimento pelo conector não é herdada pelo app publicado. É necessário criar credenciais próprias para esta aplicação.
+- O primeiro par pode ser carregado das variáveis privadas `OMIE_APP_HASH`, `OMIE_ACCESS_TOKEN`, `OMIE_REFRESH_TOKEN` e `OMIE_ACCESS_TOKEN_ISSUED_AT`.
+- A conexão Omie usada durante desenvolvimento pelo conector não é herdada pelo app publicado.
+
+Não configurar App Key/Secret e tokens Bearer simultaneamente sem uma decisão explícita de migração. O código prioriza App Key/Secret quando o par está presente. Segredos nunca são registrados em logs, enviados ao navegador ou versionados no GitHub.
+
+O webhook que aparece na tela da integração Omie não é necessário ao fluxo atual. A aplicação realiza chamadas síncronas para inclusão e consulta de pedidos; a sincronização de expedição lê os dados que o próprio Omie recebeu da integração Correios.
 
 ## Mapeamento operacional observado em 04/11/2026
 - Cliente Uber do Brasil Tecnologia Ltda., código Omie `2867720329`.
@@ -33,7 +46,7 @@ A preparação local fica no Supabase com chave estável `UFB-<uuid>`. Ao clicar
 1. confere sessão e perfil admin/gestor/operador;
 2. confere destinatário, endereço, e-mail e item;
 3. reserva o pedido local em `order_pending`;
-4. consulta o Omie pelo código de integração se a situação estiver pendente, antes de considerar nova inclusão;
+4. consulta o Omie pelo código de integração se a situação estiver pendente, antes de considerar nova repetição;
 5. executa `IncluirPedido` apenas quando não há pedido localizado;
 6. grava ID e número Omie e trilha de auditoria.
 
@@ -55,9 +68,10 @@ As migrations abaixo foram aplicadas ao projeto Supabase conectado em 04/11/2026
 
 A validação confirmou as colunas de e-mail, sincronização, DANFE e frete; a função de preparação com a nova assinatura; e que as funções Vault só podem ser executadas por `service_role` (sem execução por `anon` ou `authenticated`). Nenhum dado de negócio foi apagado ou atualizado por essas migrations.
 
-## Bloqueios antes do primeiro uso real
-- Configurar credenciais próprias da aplicação no Render, incluindo data/hora ISO de emissão do primeiro token.
-- Confirmar com o responsável fiscal o cenário, CFOP, preço, parcela, categoria, conta, flags de estoque/financeiro e os dados de destino.
+## Próximos passos
+- Configurar App Key e App Secret do aplicativo Omie correto como variáveis privadas no Render, ou concluir a configuração Bearer/Vault.
+- Fazer uma chamada somente de leitura ao Omie para validar autenticação, empresa, cliente e produto.
+- Confirmar com o responsável fiscal o cenário, CFOP, preço, parcela, categoria, conta, flags de estoque/financeiro e dados do destino.
 - Fazer o primeiro pedido com supervisão do operador, depois testar consulta e conciliação.
 - O botão de faturamento pode emitir NF-e real e exige confirmação explícita.
 - A expedição será validada usando a integração Correios dentro do Omie, sem duplicar integração externa.
