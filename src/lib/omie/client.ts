@@ -13,6 +13,11 @@ type StoredOmieCredentials = {
   expiresAt: string;
 };
 
+type LegacyOmieCredentials = {
+  appKey: string;
+  appSecret: string;
+};
+
 type OmiePayload = Record<string, unknown> & {
   faultstring?: string;
   faultcode?: string;
@@ -39,6 +44,20 @@ export class OmieApiError extends Error {
 let cachedCredentials: StoredOmieCredentials | null = null;
 let credentialsLoadPromise: Promise<StoredOmieCredentials> | null = null;
 let refreshPromise: Promise<StoredOmieCredentials> | null = null;
+
+function legacyCredentialsFromEnvironment(): LegacyOmieCredentials | null {
+  const appKey = process.env.OMIE_APP_KEY?.trim();
+  const appSecret = process.env.OMIE_APP_SECRET?.trim();
+
+  if (!appKey && !appSecret) return null;
+  if (!appKey || !appSecret) {
+    throw new OmieConfigurationError(
+      "Configure OMIE_APP_KEY e OMIE_APP_SECRET juntos no ambiente privado do servidor.",
+    );
+  }
+
+  return { appKey, appSecret };
+}
 
 function validCredentials(value: unknown): value is StoredOmieCredentials {
   if (!value || typeof value !== "object") return false;
@@ -98,7 +117,7 @@ function bootstrapCredentialsFromEnvironment(): StoredOmieCredentials {
 
   if (!appHash || !accessToken || !refreshToken || !issuedAt) {
     throw new OmieConfigurationError(
-      "Configure OMIE_APP_HASH, OMIE_ACCESS_TOKEN, OMIE_REFRESH_TOKEN e OMIE_ACCESS_TOKEN_ISSUED_AT no ambiente do servidor. Informe o instante de emissão do par de tokens em ISO 8601. As chaves antigas App Key/App Secret não são usadas pela autenticação atual.",
+      "Configure OMIE_APP_HASH, OMIE_ACCESS_TOKEN, OMIE_REFRESH_TOKEN e OMIE_ACCESS_TOKEN_ISSUED_AT no ambiente do servidor, ou use OMIE_APP_KEY e OMIE_APP_SECRET.",
     );
   }
 
@@ -202,7 +221,7 @@ async function refreshCredentials(force = false): Promise<StoredOmieCredentials>
   }
 }
 
-async function requestOmie(
+async function requestOmieBearer(
   endpoint: string,
   method: string,
   params: Record<string, unknown>,
@@ -224,27 +243,35 @@ async function requestOmie(
   return { response, payload };
 }
 
-/**
- * Cliente server-side da API Omie. Nunca importar em componentes client.
- * O token Bearer é renovado e armazenado no Supabase Vault.
- */
-export async function callOmie<T extends Record<string, unknown>>(
+async function requestOmieAppKey(
   endpoint: string,
   method: string,
-  params: Record<string, unknown> = {},
-): Promise<T> {
-  if (!endpoint.startsWith("/") || endpoint.includes("..")) {
-    throw new Error("Endpoint Omie inválido.");
-  }
+  params: Record<string, unknown>,
+  credentials: LegacyOmieCredentials,
+): Promise<{ response: Response; payload: OmiePayload | null }> {
+  const response = await fetch(`${OMIE_API_BASE_URL}${endpoint}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({
+      call: method,
+      app_key: credentials.appKey,
+      app_secret: credentials.appSecret,
+      param: [params],
+    }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(60_000),
+  });
 
-  let credentials = await refreshCredentials();
-  let result = await requestOmie(endpoint, method, params, credentials.accessToken);
+  const payload = await response.json().catch(() => null) as OmiePayload | null;
+  return { response, payload };
+}
 
-  if (result.response.status === 401) {
-    credentials = await refreshCredentials(true);
-    result = await requestOmie(endpoint, method, params, credentials.accessToken);
-  }
-
+function assertOmieSuccess(
+  result: { response: Response; payload: OmiePayload | null },
+): OmiePayload {
   if (!result.response.ok) {
     throw new OmieApiError(
       typeof result.payload?.faultstring === "string"
@@ -263,16 +290,53 @@ export async function callOmie<T extends Record<string, unknown>>(
     throw new OmieApiError(result.payload.faultstring, result.payload.faultcode);
   }
 
-  return result.payload as T;
+  return result.payload;
+}
+
+/**
+ * Cliente server-side da API Omie. Nunca importar em componentes client.
+ * Aceita App Key/Secret (modelo tradicional) ou token Bearer com renovação no Vault.
+ */
+export async function callOmie<T extends Record<string, unknown>>(
+  endpoint: string,
+  method: string,
+  params: Record<string, unknown> = {},
+): Promise<T> {
+  if (!endpoint.startsWith("/") || endpoint.includes("..")) {
+    throw new Error("Endpoint Omie inválido.");
+  }
+
+  const legacyCredentials = legacyCredentialsFromEnvironment();
+  if (legacyCredentials) {
+    const result = await requestOmieAppKey(endpoint, method, params, legacyCredentials);
+    return assertOmieSuccess(result) as T;
+  }
+
+  let credentials = await refreshCredentials();
+  let result = await requestOmieBearer(endpoint, method, params, credentials.accessToken);
+
+  if (result.response.status === 401) {
+    credentials = await refreshCredentials(true);
+    result = await requestOmieBearer(endpoint, method, params, credentials.accessToken);
+  }
+
+  return assertOmieSuccess(result) as T;
 }
 
 export function getOmieCredentialStatus() {
+  const legacyConfigured = Boolean(
+    process.env.OMIE_APP_KEY?.trim() && process.env.OMIE_APP_SECRET?.trim(),
+  );
+  const bearerConfigured = Boolean(
+    process.env.OMIE_APP_HASH &&
+    (cachedCredentials || (process.env.OMIE_ACCESS_TOKEN && process.env.OMIE_REFRESH_TOKEN)),
+  );
+
   return {
-    configured: Boolean(
-      process.env.OMIE_APP_HASH &&
-      (cachedCredentials || (process.env.OMIE_ACCESS_TOKEN && process.env.OMIE_REFRESH_TOKEN)),
-    ),
-    authentication: "Bearer token com renovação automática",
-    storage: "Supabase Vault",
+    configured: legacyConfigured || bearerConfigured,
+    authentication: legacyConfigured
+      ? "App Key/Secret (server-side)"
+      : "Bearer token com renovação automática",
+    storage: legacyConfigured ? "Variáveis privadas do Render" : "Supabase Vault",
   } as const;
 }
