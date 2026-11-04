@@ -75,6 +75,10 @@ alter table public.fulfillments
   add column if not exists omie_last_sync_at timestamptz,
   add column if not exists omie_last_error text;
 
+alter table public.invoices
+  add column if not exists danfe_url text,
+  add column if not exists xml_available boolean not null default false;
+
 alter table public.shipments
   add column if not exists tracking_url text,
   add column if not exists estimated_delivery_date date,
