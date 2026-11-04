@@ -25,6 +25,7 @@ export type OrderRecipient = {
   id: string;
   full_name: string;
   document_number: string | null;
+  email: string | null;
   delivery_addresses: Address[];
 };
 
@@ -41,8 +42,9 @@ export type OrderDraft = {
   status: string;
   omie_order_number: string | null;
   customer_purchase_order: string | null;
+  customer_email: string | null;
   created_at: string;
-  recipients: { full_name: string } | null;
+  recipients: { full_name: string; email: string | null } | null;
   delivery_addresses: { city: string; state: string; postal_code: string } | null;
   fulfillment_items: OrderItem[];
 };
@@ -164,7 +166,7 @@ export function OrderManagement({
         {visibleDrafts.length ? (
           <div className="orders-table-wrap">
             <table className="orders-table">
-              <thead><tr><th>DESTINATÁRIO</th><th>PRODUTO</th><th>REFERÊNCIA</th><th>ENDEREÇO</th><th>TOTAL</th><th>STATUS</th><th>CRIADO EM</th></tr></thead>
+              <thead><tr><th>DESTINATÁRIO</th><th>PRODUTO</th><th>REFERÊNCIA</th><th>ENDEREÇO</th><th>E-MAIL NF-E</th><th>TOTAL</th><th>STATUS</th><th>CRIADO EM</th></tr></thead>
               <tbody>
                 {visibleDrafts.map((draft) => {
                   const item = draft.fulfillment_items?.[0];
@@ -174,6 +176,7 @@ export function OrderManagement({
                       <td><strong>{item?.description ?? "Produto não informado"}</strong><small>{item?.product_code ?? "Sem código"} · {item?.quantity ?? 0} un.</small></td>
                       <td>{draft.customer_purchase_order || "Não informada"}</td>
                       <td><span className="orders-address"><MapPin size={12} />{draft.delivery_addresses ? `${draft.delivery_addresses.city}/${draft.delivery_addresses.state} · ${draft.delivery_addresses.postal_code}` : "Sem endereço"}</span></td>
+                      <td>{draft.customer_email || draft.recipients?.email || "Não informado"}</td>
                       <td><strong>{formatCurrency(Number(item?.line_total ?? Number(item?.quantity ?? 0) * Number(item?.unit_price ?? 0)))}</strong></td>
                       <td><span className={`order-status order-status-${draft.status}`}>{statusLabel(draft.status)}</span></td>
                       <td><span className="orders-date"><Clock3 size={12} />{formatDate(draft.created_at)}</span></td>
@@ -224,7 +227,8 @@ function OrderDraftModal({
   const [recipientId, setRecipientId] = useState(firstRecipient?.id ?? "");
   const selectedRecipient = recipients.find((recipient) => recipient.id === recipientId) ?? null;
   const addresses = selectedRecipient?.delivery_addresses ?? [];
-  const [addressId, setAddressId] = useState(latestAddress(firstRecipient ?? { id: "", full_name: "", document_number: null, delivery_addresses: [] })?.id ?? "");
+  const [addressId, setAddressId] = useState(latestAddress(firstRecipient ?? { id: "", full_name: "", document_number: null, email: null, delivery_addresses: [] })?.id ?? "");
+  const [customerEmail, setCustomerEmail] = useState(firstRecipient?.email ?? "");
 
   const orderedAddresses = useMemo(() => [...addresses].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
@@ -238,7 +242,8 @@ function OrderDraftModal({
   function changeRecipient(nextId: string) {
     setRecipientId(nextId);
     const recipient = recipients.find((item) => item.id === nextId);
-    setAddressId(latestAddress(recipient ?? { id: "", full_name: "", document_number: null, delivery_addresses: [] })?.id ?? "");
+    setAddressId(latestAddress(recipient ?? { id: "", full_name: "", document_number: null, email: null, delivery_addresses: [] })?.id ?? "");
+    setCustomerEmail(recipient?.email ?? "");
   }
 
   return (
@@ -271,6 +276,10 @@ function OrderDraftModal({
             </div>
           )}
 
+          <div className="recipient-form-section recipient-address-section"><strong>E-mail para o cliente</strong><span>O endereço será preenchido na aba “E-mail para o Cliente” do pedido Omie para receber a NF-e. O envio automático de e-mail permanece desativado.</span></div>
+          <div className="recipient-form-grid">
+            <label className="field-wide">E-mail para o cliente (NF-e)<input name="customer_email" type="email" autoComplete="email" maxLength={160} value={customerEmail} onChange={(event) => setCustomerEmail(event.target.value)} placeholder="E-mail cadastrado no destinatário" /></label>
+          </div>
           <div className="recipient-form-section recipient-address-section"><strong>Item do pedido</strong><span>Produto consultado no cadastro Omie. O valor é uma referência editável e exige conferência antes da integração.</span></div>
           <div className="order-product-card">
             <span className="order-product-icon"><Package size={20} /></span>

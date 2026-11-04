@@ -19,6 +19,9 @@ Este mapeamento é referência observada, não autorização para emissão fisca
 ## Endereço do motorista
 Em pedido recente consultado, o cliente do pedido foi Uber e o endereço do motorista foi informado como endereço físico de destino nos campos adicionais do pedido. A integração deverá manter o cliente ERP Uber e transportar o endereço versionado do motorista para os campos de destino apropriados. Não criar um cliente ERP por motorista sem decisão explícita do responsável fiscal.
 
+## E-mail para o cliente
+A documentação oficial da API de Pedido de Venda identifica `informacoes_adicionais.utilizar_emails` como a lista de destinatários da Nota Fiscal, apresentada na aba **E-mail para o Cliente**. O sistema deve preencher essa propriedade com o e-mail salvo na preparação local. O campo `enviar_email` é distinto: controla o disparo de boleto/DANFE/XML após faturamento e deve permanecer `N` até haver uma decisão explícita de negócio.
+
 ## Operações a implementar e validar
 - Consultar cliente, produto, etapa, cenário fiscal e condição de pagamento.
 - Consultar transportadoras, modalidades, tipos de entrega, embalagens e serviços.
@@ -34,3 +37,7 @@ Em pedido recente consultado, o cliente do pedido foi Uber e o endereço do moto
 3. Executar cada faturamento individualmente, com correlação local.
 4. Consultar o status fiscal após a execução.
 5. Não refaturar automaticamente resultados incertos.
+
+
+## Preflight obrigatório antes de incluir pedido
+O método `IncluirPedido` exige dados de cabeçalho, etapa, data de previsão, condição de pagamento, informações adicionais e item. A aba de e-mail é alimentada por `informacoes_adicionais.utilizar_emails`. Antes de habilitar a escrita, precisam estar confirmados para a operação atual: etapa inicial, condição de pagamento, categoria, conta corrente, indicador de consumidor final, data prevista, regra de estoque/financeiro e cenário/CFOP. Valores observados em pedidos anteriores servem para comparação, não como autorização nem como padrão definitivo.

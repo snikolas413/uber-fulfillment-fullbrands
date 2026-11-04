@@ -35,6 +35,7 @@ export async function prepareOrderAction(
     const deliveryAddressId = String(formData.get("delivery_address_id") ?? "").trim();
     const idempotencyKey = String(formData.get("idempotency_key") ?? "").trim();
     const purchaseOrder = String(formData.get("customer_purchase_order") ?? "").trim();
+    const customerEmail = String(formData.get("customer_email") ?? "").trim().toLowerCase();
     const quantity = Number(formData.get("quantity"));
     const unitPrice = Number(String(formData.get("unit_price") ?? "").replace(",", "."));
 
@@ -54,12 +55,16 @@ export async function prepareOrderAction(
     if (purchaseOrder.length > 30) {
       return { status: "error", message: "A referência do pedido de compra aceita até 30 caracteres." };
     }
+    if (customerEmail.length > 160 || (customerEmail && !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(customerEmail))) {
+      return { status: "error", message: "Informe um e-mail válido para o envio da NF-e." };
+    }
 
     const { error } = await supabase.rpc("prepare_uber_fulfillment", {
       p_recipient_id: recipientId,
       p_delivery_address_id: deliveryAddressId,
       p_idempotency_key: idempotencyKey,
       p_customer_purchase_order: purchaseOrder || null,
+      p_customer_email: customerEmail || null,
       p_quantity: quantity,
       p_unit_price: unitPrice,
     });
@@ -70,6 +75,9 @@ export async function prepareOrderAction(
       }
       if (error.code === "PGRST202" || error.message.includes("prepare_uber_fulfillment")) {
         return { status: "error", message: "A atualização do banco ainda não foi aplicada. O cadastro será liberado após a publicação da migration." };
+      }
+      if (error.message.includes("INVALID_CUSTOMER_EMAIL")) {
+        return { status: "error", message: "O e-mail informado é inválido. Corrija o endereço antes de continuar." };
       }
       if (error.message.includes("ADDRESS_INVALID")) {
         return { status: "error", message: "O endereço está marcado como inválido. Corrija o cadastro antes de preparar o pedido." };

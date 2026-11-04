@@ -19,9 +19,18 @@ A aplicação registra uma preparação local por destinatário. A etapa não cr
 - Purchase Order Uber: usar como referência de cliente quando disponível.
 - Não reaproveitar automaticamente o CFOP, preço, cenário ou condição de pagamento sem validar que continuam aplicáveis ao pedido atual.
 
+## E-mail para o cliente no Omie
+- O e-mail do destinatário é carregado automaticamente na preparação do pedido e pode ser ajustado para aquele pedido.
+- A aplicação guarda uma cópia do e-mail no próprio pedido local, preservando o contato usado mesmo que o cadastro do destinatário mude depois.
+- Na integração, o campo será enviado em `informacoes_adicionais.utilizar_emails`, que corresponde à aba **E-mail para o Cliente** e aceita múltiplos endereços separados por vírgula.
+- `informacoes_adicionais.enviar_email` continuará como `N` por padrão. Preencher o destinatário não deve disparar o envio automático de boleto, DANFE ou XML.
+
 ## Próximas validações antes de habilitar o envio ao Omie
 1. Confirmar se o pedido fica no cliente Uber com endereço do motorista nos dados adicionais, conforme o pedido de referência.
 2. Validar etapa inicial e condição de pagamento para inclusão pela API.
 3. Confirmar valores, regras fiscais, estoque e tratamento de preço negociado.
 4. Implementar chamada Omie com código de integração idempotente e reconciliação em caso de timeout.
 5. Executar integração primeiro em um ambiente de testes ou com um pedido expressamente autorizado.
+
+
+A integração externa permanece bloqueada enquanto essas definições e as credenciais próprias da aplicação não estiverem configuradas e validadas.
