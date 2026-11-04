@@ -2,13 +2,14 @@ services:
   - type: web
     name: uber-fulfillment-fullbrands
     runtime: node
-    plan: starter
+    plan: free
+    region: virginia
     buildCommand: npm install && npm run build
     startCommand: npm run start
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
-        value: 22.16.0
+        value: 24.22.1
       - key: NEXT_TELEMETRY_DISABLED
         value: "1"
       - key: NEXT_PUBLIC_SUPABASE_URL
