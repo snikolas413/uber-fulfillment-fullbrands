@@ -16,8 +16,6 @@ services:
         sync: false
       - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
         sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
       - key: OMIE_APP_KEY
         sync: false
       - key: OMIE_APP_SECRET
