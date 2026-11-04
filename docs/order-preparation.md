@@ -34,3 +34,7 @@ A aplicação registra uma preparação local por destinatário. A etapa não cr
 
 
 A integração externa permanece bloqueada enquanto essas definições e as credenciais próprias da aplicação não estiverem configuradas e validadas.
+
+
+## Pré-conferência de faturamento
+A fila de faturamento também exibe as preparações locais com status `ready`, incluindo destinatário, Purchase Order, e-mail capturado, item e total. Essa visão é uma etapa de conferência anterior à inclusão no ERP. Não altera status, não cria pedido Omie e não emite NF-e.
