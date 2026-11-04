@@ -6,7 +6,8 @@ import {
   Plus, ClipboardList, Search, MapPin, Package, Clock3, FileText,
   ShieldCheck, X, LoaderCircle, AlertCircle, ChevronRight
 } from "lucide-react";
-import { orderInitialState, prepareOrderAction } from "./actions";
+import { prepareOrderAction } from "./actions";
+import type { OrderActionState } from "./actions";
 import { OmieActionButton } from "@/components/omie-action-button";
 
 type Address = {
@@ -49,6 +50,8 @@ export type OrderDraft = {
   delivery_addresses: { city: string; state: string; postal_code: string } | null;
   fulfillment_items: OrderItem[];
 };
+
+const orderInitialState: OrderActionState = { status: "idle", message: "" };
 
 const PRODUCT_REFERENCE = {
   code: "R18",
