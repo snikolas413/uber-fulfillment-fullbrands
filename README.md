@@ -2,11 +2,14 @@
 
 Aplicação interna para cadastro de destinatários, gestão de pedidos, faturamento, expedição e rastreabilidade da operação Uber.
 
+## Acesso ao preview
+https://uber-fulfillment-fullbrands.onrender.com
+
 ## Tecnologia
-- Next.js + React + TypeScript
-- PostgreSQL gerenciado pelo Supabase
+- Next.js 16 + React + TypeScript
+- PostgreSQL gerenciado pelo Supabase (projeto independente pendente de nova organização)
 - API Omie exclusivamente no backend
-- Render como opção de hospedagem
+- Render para hospedagem
 
 ## Executar localmente
 ```bash
@@ -23,12 +26,14 @@ npm run dev
 - Etiquetas, documentos fiscais e expedição
 - Histórico e auditoria
 
-## Segurança
+## Segurança e estado atual
 - Credenciais Omie e chave Supabase de serviço apenas no servidor.
 - Operações críticas exigem confirmação explícita.
 - Timeout em mutações exige conciliação antes de nova tentativa.
 - Dados pessoais e documentos fiscais não devem ser gravados no Git.
-- Configurações e registros de produção permanecem em serviços seguros fora do repositório.
+- O preview público está em modo inicial, sem autenticação e sem conexão de produção.
+- **Não cadastrar dados reais de motoristas nem usar o painel para operar pedidos até concluir autenticação, banco dedicado e autorização por usuário.**
+- O repositório está público conforme decisão do responsável; não incluir segredos, chaves ou dados pessoais.
 
 ## Estrutura
 - `src/app`: páginas e rotas de API
@@ -38,13 +43,6 @@ npm run dev
 - `supabase/migrations`: estrutura inicial do banco
 - `docs`: arquitetura, modelo de dados e identidade visual
 - `public/brand`: arquivos oficiais da marca
-
-## Estado do projeto
-- [x] Repositório GitHub inicializado
-- [ ] Integração e autenticação concluídas
-- [ ] Banco configurado no ambiente da aplicação
-- [ ] Fluxo operacional validado
-- [ ] Hospedagem publicada
 
 ## Validar
 ```bash
