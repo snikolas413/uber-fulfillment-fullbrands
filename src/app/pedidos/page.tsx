@@ -1,0 +1,2 @@
+import { ClipboardList } from "lucide-react"; import { ModulePage } from "@/components/module-page";
+export default function Page() { return <ModulePage eyebrow="ERP · OMIE" title="Pedidos" lead="Prepare, revise e acompanhe um pedido de venda por destinatário." icon={<ClipboardList size={20}/>} message="A criação de pedidos será habilitada depois da validação dos campos fiscais e dos parâmetros definitivos do Omie."/>; }

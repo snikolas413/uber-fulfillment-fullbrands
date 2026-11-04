@@ -1,0 +1,2 @@
+import { Truck } from "lucide-react"; import { ModulePage } from "@/components/module-page";
+export default function Page() { return <ModulePage eyebrow="CORREIOS · DOCUMENTOS" title="Expedição" lead="Gere etiquetas, reúna os dados fiscais e organize a impressão dos envios." icon={<Truck size={20}/>} message="A integração depende da confirmação do serviço Mini Envios, embalagem e métodos disponíveis na conta Omie."/>; }

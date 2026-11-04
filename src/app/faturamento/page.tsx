@@ -1,0 +1,2 @@
+import { FileText } from "lucide-react"; import { ModulePage } from "@/components/module-page";
+export default function Page() { return <ModulePage eyebrow="PROCESSAMENTO EM LOTE" title="Faturamento" lead="Selecione pedidos elegíveis, confira a prévia e acompanhe o resultado individual." icon={<FileText size={20}/>} message="O faturamento em lote exigirá conferência de status no Omie e confirmação explícita antes de cada execução."/>; }

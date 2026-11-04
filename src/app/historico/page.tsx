@@ -1,0 +1,2 @@
+import { Activity } from "lucide-react"; import { ModulePage } from "@/components/module-page";
+export default function Page() { return <ModulePage eyebrow="AUDITORIA" title="Histórico" lead="Consulte a trilha de cada destinatário, pedido, nota fiscal e envio." icon={<Activity size={20}/>} message="Os eventos serão registrados com data, operador, operação, correlação e resultado, sem armazenar credenciais."/>; }

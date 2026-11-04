@@ -1,0 +1,2 @@
+import { Settings2 } from "lucide-react"; import { ModulePage } from "@/components/module-page";
+export default function Page() { return <ModulePage eyebrow="SISTEMA" title="Configurações" lead="Gerencie conexões, parâmetros operacionais e permissões de acesso." icon={<Settings2 size={20}/>} message="As credenciais serão configuradas no ambiente seguro do servidor. Nenhuma chave de API deve ser cadastrada ou exibida no navegador."/>; }

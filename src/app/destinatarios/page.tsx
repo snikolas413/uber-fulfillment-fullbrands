@@ -1,0 +1,2 @@
+import { UserPlus } from "lucide-react"; import { ModulePage } from "@/components/module-page";
+export default function Page() { return <ModulePage eyebrow="CADASTRO" title="Destinatários" lead="Cadastre e mantenha os dados dos motoristas e seus endereços de entrega." icon={<UserPlus size={20}/>} message="O formulário será conectado ao banco após a configuração da autenticação e das políticas de acesso."/>; }
