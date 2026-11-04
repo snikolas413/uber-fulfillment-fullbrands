@@ -9,7 +9,7 @@ export type RecipientActionState = {
 };
 
 const emptyToNull = (value: string) => value.trim() || null;
-const digitsOnly = (value: string) => value.replace(/\\D/g, "");
+const digitsOnly = (value: string) => value.replace(/\D/g, "");
 
 export async function saveRecipientAction(
   _previousState: RecipientActionState,

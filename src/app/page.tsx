@@ -17,7 +17,7 @@ export default async function DashboardPage() {
   const [recipients, orders, billing, shipped] = await Promise.all([
    supabase.from("recipients").select("id", { count: "exact", head: true }),
    supabase.from("fulfillments").select("id", { count: "exact", head: true }).not("omie_order_id", "is", null),
-   supabase.from("fulfillments").select("id", { count: "exact", head: true }).eq("status", "billing_pending"),
+   supabase.from("fulfillments").select("id", { count: "exact", head: true }).in("status", ["order_created", "billing_pending"]),
    supabase.from("fulfillments").select("id", { count: "exact", head: true }).eq("status", "shipped"),
   ]);
   recipientsCount = recipients.count ?? 0;
@@ -30,7 +30,7 @@ export default async function DashboardPage() {
  const metrics = [
   { label:"Destinatários cadastrados", value:String(recipientsCount), note:"Base de motoristas", icon:Users },
   { label:"Pedidos criados", value:String(ordersCount), note:"Pedidos registrados no Omie", icon:FilePlus2 },
-  { label:"Aguardando faturamento", value:String(billingCount), note:"Pedidos pendentes de NF-e", icon:ClipboardCheck },
+  { label:"Aguardando faturamento", value:String(billingCount), note:"Pedidos aguardando NF-e", icon:ClipboardCheck },
   { label:"Envios concluídos", value:String(shippedCount), note:"Pedidos marcados como enviados", icon:PackageCheck }
  ];
  const steps = [
@@ -47,7 +47,7 @@ export default async function DashboardPage() {
    </article>
    <article className="panel integration-panel"><div className="panel-heading"><div><span className="section-kicker">SAÚDE DAS CONEXÕES</span><h2>Integrações</h2></div><span className="panel-icon"><PackageSearch size={18}/></span></div>
     <div className="integration-row"><div className="integration-mark omie-mark">O</div><div className="integration-copy"><strong>Omie ERP</strong><small>Pedidos, NF-e e fretes</small></div><span className="status-tag status-pending">Credenciais pendentes</span></div>
-    <div className="integration-row"><div className="integration-mark database-mark">DB</div><div className="integration-copy"><strong>Banco de dados</strong><small>Login e políticas de acesso validados</small></div><span className="status-tag status-review">Conectado</span></div>
+    <div className="integration-row"><div className="integration-mark database-mark">DB</div><div className="integration-copy"><strong>Banco de dados</strong><small>Autenticação administrativa ativa</small></div><span className="status-tag status-review">Conectado</span></div>
     <div className="integration-row"><div className="integration-mark shipping-mark"><Truck size={17}/></div><div className="integration-copy"><strong>Correios</strong><small>Mini Envios e etiquetas</small></div><span className="status-tag status-review">A validar</span></div>
     <div className="integration-footnote"><span className="footnote-dot"/>{dataLoadFailed ? "Não foi possível atualizar todos os indicadores." : "Indicadores carregados diretamente do banco de dados."}</div>
    </article>
