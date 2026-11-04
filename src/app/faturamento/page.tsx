@@ -1,10 +1,11 @@
 import { redirect } from "next/navigation";
 import { ClipboardCheck, Clock3, FileText, ShieldCheck, Mail, Package } from "lucide-react";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { OmieActionButton } from "@/components/omie-action-button";
 
 export const dynamic = "force-dynamic";
 
-type InvoiceRecord = { omie_invoice_number: string | null; access_key: string | null; status: string; issued_at: string | null };
+type InvoiceRecord = { omie_invoice_number: string | null; access_key: string | null; status: string; issued_at: string | null; danfe_url: string | null; xml_available: boolean };
 type BillingRow = {
   id: string;
   status: string;
@@ -71,7 +72,7 @@ export default async function BillingPage() {
       .limit(100),
     supabase
       .from("fulfillments")
-      .select("id, status, omie_order_number, created_at, recipients(full_name), invoices(omie_invoice_number, access_key, status, issued_at)")
+      .select("id, status, omie_order_number, created_at, recipients(full_name), invoices(omie_invoice_number, access_key, status, issued_at, danfe_url, xml_available)")
       .in("status", ["order_created", "billing_pending", "billed"])
       .order("created_at", { ascending: false })
       .limit(100),
@@ -118,22 +119,23 @@ export default async function BillingPage() {
             })}</tbody>
           </table></div>
         ) : <div className="recipient-empty"><span className="recipient-empty-icon"><Package size={24} /></span><strong>Nenhuma preparação aguardando integração</strong><p>Quando um pedido local for preparado, ele aparecerá aqui para conferência antes de qualquer envio ao ERP.</p></div>}
-        <div className="recipient-table-footer"><span>{preparedRows.length} preparação(ões) nesta fila</span><span>Esta tela é somente de conferência. Nenhuma chamada é feita ao Omie.</span></div>
+        <div className="recipient-table-footer"><span>{preparedRows.length} preparação(ões) nesta fila</span><span>A sincronização consulta o Omie. O faturamento é uma ação fiscal separada e exige confirmação.</span></div>
       </section>
 
       <section className="panel orders-panel">
         <div className="recipient-toolbar"><div><span className="section-kicker">FILA DE FATURAMENTO</span><h2>Pedidos e notas fiscais</h2></div></div>
         {billingResult.error ? <div className="recipient-alert recipient-alert-error">Não foi possível consultar a fila fiscal.</div> : rows.length ? (
           <div className="orders-table-wrap"><table className="orders-table">
-            <thead><tr><th>DESTINATÁRIO</th><th>PEDIDO OMIE</th><th>STATUS</th><th>NF-E</th><th>EMISSÃO</th></tr></thead>
+            <thead><tr><th>DESTINATÁRIO</th><th>PEDIDO OMIE</th><th>STATUS</th><th>NF-E / DOCUMENTOS</th><th>EMISSÃO</th><th>AÇÕES</th></tr></thead>
             <tbody>{rows.map((row) => {
               const invoice = firstRelation(row.invoices);
               return <tr key={row.id}>
                 <td><strong>{row.recipients?.full_name ?? "Destinatário indisponível"}</strong><small>{formatDate(row.created_at)}</small></td>
                 <td>{row.omie_order_number ? `#${row.omie_order_number}` : "Aguardando número Omie"}</td>
                 <td><span className={`order-status order-status-${row.status}`}>{statusLabel(row.status)}</span></td>
-                <td>{invoice?.omie_invoice_number || "—"}</td>
+                <td><strong>{invoice?.omie_invoice_number || "—"}</strong><small>{invoice?.danfe_url ? <a href={invoice.danfe_url} target="_blank" rel="noreferrer">Abrir DANFE</a> : "DANFE não disponível"}</small><small>{invoice?.xml_available ? "XML disponível no Omie" : "XML ainda não recebido"}</small></td>
                 <td>{formatDate(invoice?.issued_at ?? null)}</td>
+                <td><OmieActionButton fulfillmentId={row.id} kind="sync-order" size="small" />{row.status === "billing_pending" && <OmieActionButton fulfillmentId={row.id} kind="invoice" size="small" />}</td>
               </tr>;
             })}</tbody>
           </table></div>
