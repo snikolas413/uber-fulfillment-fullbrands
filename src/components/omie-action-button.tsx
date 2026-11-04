@@ -59,7 +59,15 @@ export function OmieActionButton({
       let response: OmieActionResult;
       switch (kind) {
         case "send":
-          response = await sendOrderToOmieAction(fulfillmentId, true);
+          response = await sendOrderToOmieAction(fulfillmentId, false);
+          if (response.status === "warning" && response.message.includes("não localizou o código de integração")) {
+            const retryAccepted = window.confirm(
+              "O Omie não encontrou este código de integração. Você já conferiu a fila de pedidos no ERP e confirmou que ele realmente não foi criado? Só prossiga se tiver certeza, para evitar duplicidade."
+            );
+            if (retryAccepted) {
+              response = await sendOrderToOmieAction(fulfillmentId, true);
+            }
+          }
           break;
         case "sync-order":
           response = await syncOmieOrderAction(fulfillmentId);
