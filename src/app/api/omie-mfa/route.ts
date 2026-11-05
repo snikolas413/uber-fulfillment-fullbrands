@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { getOmieMfaRedis, mfaResponseKey } from "@/lib/omie-mfa/redis";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,16 +12,31 @@ async function getOperator() {
   const { data: profile, error } = await supabase.from("user_profiles")
     .select("role,is_active").eq("id", auth.user.id).maybeSingle();
   if (error || !profile?.is_active || !["admin", "gestor", "operador"].includes(profile.role)) return null;
-  return auth.user;
+  return { user: auth.user, supabase };
+}
+
+async function waitForPrivateChannel(channel: ReturnType<Awaited<ReturnType<typeof createSupabaseServerClient>>["channel"]>) {
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Realtime subscription timed out.")), 8000);
+    channel.subscribe((status) => {
+      if (status === "SUBSCRIBED") {
+        clearTimeout(timeout);
+        resolve();
+      } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+        clearTimeout(timeout);
+        reject(new Error("Realtime private channel unavailable."));
+      }
+    });
+  });
 }
 
 export async function GET() {
-  const user = await getOperator();
-  if (!user) return NextResponse.json({ error: "Acesso não autorizado." }, { status: 401 });
+  const operator = await getOperator();
+  if (!operator) return NextResponse.json({ error: "Acesso não autorizado." }, { status: 401 });
   const admin = createSupabaseAdminClient();
   const { data, error } = await admin.from("omie_shipping_jobs")
     .select("id,fulfillment_id,challenge_id,challenge_expires_at")
-    .eq("requested_by", user.id).eq("status", "awaiting_mfa")
+    .eq("requested_by", operator.user.id).eq("status", "awaiting_mfa")
     .order("created_at", { ascending: false }).limit(1);
   if (error) return NextResponse.json({ error: "Não foi possível consultar a autenticação pendente." }, { status: 503 });
   const now = Date.now();
@@ -32,8 +46,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const user = await getOperator();
-  if (!user) return NextResponse.json({ error: "Acesso não autorizado." }, { status: 401 });
+  const operator = await getOperator();
+  if (!operator) return NextResponse.json({ error: "Acesso não autorizado." }, { status: 401 });
   const origin = request.headers.get("origin");
   if (origin !== request.nextUrl.origin) return NextResponse.json({ error: "Origem inválida." }, { status: 403 });
 
@@ -44,8 +58,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Informe o código de segurança válido." }, { status: 400 });
 
   const admin = createSupabaseAdminClient();
-  const { data: job, error } = await admin.from("omie_shipping_jobs").select("id,status,challenge_expires_at,mfa_attempts")
-    .eq("challenge_id", challengeId).eq("requested_by", user.id).eq("status", "awaiting_mfa").maybeSingle();
+  const { data: job, error } = await admin.from("omie_shipping_jobs")
+    .select("id,status,challenge_expires_at,mfa_attempts")
+    .eq("challenge_id", challengeId).eq("requested_by", operator.user.id)
+    .eq("status", "awaiting_mfa").maybeSingle();
   if (error || !job) return NextResponse.json({ error: "Esta solicitação não está mais ativa." }, { status: 409 });
   if (!job.challenge_expires_at || Date.parse(job.challenge_expires_at) <= Date.now()) {
     await admin.from("omie_shipping_jobs").update({ status: "expired", updated_at: new Date().toISOString() }).eq("id", job.id);
@@ -53,22 +69,43 @@ export async function POST(request: NextRequest) {
   }
   if (job.mfa_attempts >= 5) return NextResponse.json({ error: "Limite de tentativas atingido." }, { status: 429 });
 
+  const { data: sessionData, error: sessionError } = await operator.supabase.auth.getSession();
+  const accessToken = sessionData.session?.access_token;
+  if (sessionError || !accessToken) {
+    return NextResponse.json({ error: "Sessão expirada. Entre novamente no sistema." }, { status: 401 });
+  }
+
+  const { data: updatedJob, error: updateError } = await admin.from("omie_shipping_jobs").update({
+    status: "mfa_submitted",
+    mfa_attempts: job.mfa_attempts + 1,
+    updated_at: new Date().toISOString(),
+  }).eq("id", job.id).eq("status", "awaiting_mfa").select("id").maybeSingle();
+  if (updateError || !updatedJob) {
+    return NextResponse.json({ error: updateError ? "Não foi possível confirmar o envio." : "Esta solicitação já foi processada." },
+      { status: updateError ? 503 : 409 });
+  }
+
+  const channel = operator.supabase.channel(`omie:mfa:${challengeId}`, {
+    config: { private: true, broadcast: { ack: true, self: false } },
+  });
   try {
-    const redis = getOmieMfaRedis();
-    const stored = await redis.set(mfaResponseKey(challengeId), code, "EX", 120, "NX");
-    if (stored !== "OK") return NextResponse.json({ error: "O código já foi encaminhado. Aguarde o robô." }, { status: 409 });
-    const { data: updatedJob, error: updateError } = await admin.from("omie_shipping_jobs").update({
-      status: "mfa_submitted", mfa_attempts: job.mfa_attempts + 1, updated_at: new Date().toISOString(),
-    }).eq("id", job.id).eq("status", "awaiting_mfa").select("id").maybeSingle();
-    if (updateError || !updatedJob) {
-      await redis.del(mfaResponseKey(challengeId));
-      return NextResponse.json(
-        { error: updateError ? "Não foi possível confirmar o envio." : "Esta solicitação já foi processada." },
-        { status: updateError ? 503 : 409 },
-      );
-    }
-    return NextResponse.json({ accepted: true }, { headers: { "Cache-Control": "no-store" } });
+    await operator.supabase.realtime.setAuth(accessToken);
+    await waitForPrivateChannel(channel);
+    const sent = await channel.send({
+      type: "broadcast",
+      event: "mfa_code",
+      payload: { challengeId, code },
+    });
+    if (sent !== "ok") throw new Error("Realtime did not acknowledge the message.");
+    return NextResponse.json({ accepted: true }, { headers: { "Cache-Control": "no-store, private" } });
   } catch {
-    return NextResponse.json({ error: "Canal temporário indisponível. O código não foi enviado." }, { status: 503 });
+    await admin.from("omie_shipping_jobs").update({
+      status: "failed",
+      last_error: "Não foi possível entregar o código pelo canal temporário.",
+      updated_at: new Date().toISOString(),
+    }).eq("id", job.id).eq("status", "mfa_submitted");
+    return NextResponse.json({ error: "Não foi possível entregar o código ao robô. A solicitação foi interrompida com segurança." }, { status: 503 });
+  } finally {
+    await operator.supabase.removeChannel(channel);
   }
 }
