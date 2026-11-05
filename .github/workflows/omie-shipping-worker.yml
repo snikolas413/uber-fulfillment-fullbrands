@@ -1,0 +1,40 @@
+name: Omie shipping executor
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
+
+concurrency:
+  group: omie-shipping-executor
+  cancel-in-progress: false
+
+jobs:
+  execute:
+    if: ${{ vars.OMIE_SHIPPING_WORKER_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm install --no-save playwright
+      - run: npx playwright install --with-deps chromium
+      - name: Execute one queued Omie shipping job
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OMIE_ROBOT_EMAIL: ${{ secrets.OMIE_ROBOT_EMAIL }}
+          OMIE_ROBOT_PASSWORD: ${{ secrets.OMIE_ROBOT_PASSWORD }}
+          OMIE_LOGIN_URL: ${{ vars.OMIE_LOGIN_URL }}
+          OMIE_ORDER_URL_TEMPLATE: ${{ vars.OMIE_ORDER_URL_TEMPLATE }}
+          OMIE_SHIPPING_SELECTORS_JSON: ${{ secrets.OMIE_SHIPPING_SELECTORS_JSON }}
+          OMIE_CARRIER_VALUE: ${{ vars.OMIE_CARRIER_VALUE }}
+          OMIE_PACKAGE_VALUE: ${{ vars.OMIE_PACKAGE_VALUE }}
+          OMIE_SERVICE_VALUE: ${{ vars.OMIE_SERVICE_VALUE }}
+        run: node scripts/omie-shipping-worker.mjs
