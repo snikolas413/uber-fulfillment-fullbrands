@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -15,7 +16,7 @@ async function getOperator() {
   return { user: auth.user, supabase };
 }
 
-async function waitForPrivateChannel(channel: ReturnType<Awaited<ReturnType<typeof createSupabaseServerClient>>["channel"]>) {
+async function waitForPrivateChannel(channel: RealtimeChannel) {
   await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("Realtime subscription timed out.")), 8000);
     channel.subscribe((status) => {
