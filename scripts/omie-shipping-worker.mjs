@@ -6,7 +6,11 @@ const required = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "OMIE_ROBOT_EMAIL
 for (const key of required) if (!process.env[key]) throw new Error(`Missing required worker setting: ${key}`);
 
 const selectors = JSON.parse(process.env.OMIE_SHIPPING_SELECTORS_JSON);
-for (const key of ["email", "password", "loginSubmit", "carrier", "package", "service", "quote", "confirm", "verification"]) {
+for (const key of [
+  "email", "password", "loginSubmit", "carrier", "carrierSearch", "carrierResult",
+  "package", "packageSearch", "packageResult", "packageSave",
+  "service", "serviceResult", "serviceConfirm", "orderSave", "verification",
+]) {
   if (typeof selectors[key] !== "string" || !selectors[key].trim()) throw new Error(`OMIE_SHIPPING_SELECTORS_JSON requires selector: ${key}`);
 }
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
@@ -92,27 +96,53 @@ async function execute(job) {
     if (!identity.includes(String(fulfillment.omie_order_number)) && !identity.includes(String(fulfillment.omie_order_id))) {
       throw new Error("Opened Omie page does not identify the expected order; no shipping changes were made.");
     }
-    const values = [
-      ["carrier", process.env.OMIE_CARRIER_VALUE],
-      ["package", process.env.OMIE_PACKAGE_VALUE],
-      ["service", process.env.OMIE_SERVICE_VALUE],
-    ];
-    for (const [field, value] of values) {
-      const locator = page.locator(selectors[field]);
-      if (await locator.count() !== 1) throw new Error(`Expected exactly one ${field} control.`);
-      const tag = await locator.evaluate(element => element.tagName.toLowerCase());
-      if (tag === "select") await locator.selectOption({ label: value }).catch(() => locator.selectOption(value));
-      else await locator.locator("..").getByText(value, { exact: true }).click().catch(async () => {
-        await locator.fill(value);
-      });
-    }
-    await page.locator(selectors.quote).click();
-    if (selectors.quoteResult) await page.locator(selectors.quoteResult).waitFor({ state: "visible", timeout: 30000 });
-    await page.locator(selectors.confirm).click();
+    // Transportadora: abrir o seletor, pesquisar o nome completo e escolher o resultado.
+    const carrierButton = page.locator(selectors.carrier);
+    if (await carrierButton.count() !== 1) throw new Error("Expected exactly one carrier control.");
+    await carrierButton.click();
+    const carrierSearch = page.locator(selectors.carrierSearch);
+    if (await carrierSearch.count() !== 1) throw new Error("Expected exactly one carrier search field.");
+    await carrierSearch.fill(process.env.OMIE_CARRIER_VALUE);
+    const carrierResult = page.locator(selectors.carrierResult);
+    await carrierResult.waitFor({ state: "visible", timeout: 15000 });
+    if (await carrierResult.count() !== 1) throw new Error("Carrier search did not produce exactly one configured result.");
+    await carrierResult.click();
+
+    // Embalagem: abrir pelo ícone da caixa, pesquisar UBER, selecionar e salvar a janela.
+    const packageButton = page.locator(selectors.package);
+    if (await packageButton.count() !== 1) throw new Error("Expected exactly one package control.");
+    await packageButton.click();
+    const packageSearch = page.locator(selectors.packageSearch);
+    if (await packageSearch.count() !== 1) throw new Error("Expected exactly one package search field.");
+    await packageSearch.fill(process.env.OMIE_PACKAGE_VALUE);
+    const packageResult = page.locator(selectors.packageResult);
+    await packageResult.waitFor({ state: "visible", timeout: 15000 });
+    if (await packageResult.count() !== 1) throw new Error("Package search did not produce exactly one configured result.");
+    await packageResult.click();
+    const packageSave = page.locator(selectors.packageSave);
+    if (await packageSave.count() !== 1) throw new Error("Expected exactly one package save control.");
+    await packageSave.click();
+
+    // Serviço: abrir pelo ícone do caminhão, escolher Mini Envios e confirmar.
+    const serviceButton = page.locator(selectors.service);
+    if (await serviceButton.count() !== 1) throw new Error("Expected exactly one shipping service control.");
+    await serviceButton.click();
+    const serviceResult = page.locator(selectors.serviceResult);
+    await serviceResult.waitFor({ state: "visible", timeout: 15000 });
+    if (await serviceResult.count() !== 1) throw new Error("Shipping service list did not produce exactly one configured result.");
+    await serviceResult.click();
+    const serviceConfirm = page.locator(selectors.serviceConfirm);
+    if (await serviceConfirm.count() !== 1) throw new Error("Expected exactly one shipping service confirmation control.");
+    await serviceConfirm.click();
+
+    // Gravar o pedido e confirmar os três valores na tela antes de concluir o job.
+    const orderSave = page.locator(selectors.orderSave);
+    if (await orderSave.count() !== 1) throw new Error("Expected exactly one order save control.");
+    await orderSave.click();
     await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
     const verification = await page.locator(selectors.verification).innerText({ timeout: 20000 });
     for (const expected of [process.env.OMIE_CARRIER_VALUE, process.env.OMIE_PACKAGE_VALUE, process.env.OMIE_SERVICE_VALUE]) {
-      if (!verification.includes(expected)) throw new Error("Omie did not confirm all expected shipping values after save.");
+      if (!verification.includes(expected)) throw new Error("Omie did not confirm all expected shipping values after saving the order.");
     }
     const { data: completed, error: completeError } = await supabase.rpc("complete_omie_shipping_job", { p_job_id: job.id, p_worker_id: workerId });
     if (completeError || completed !== true) throw new Error("Shipping was saved but the worker could not close its lease; reconcile the order before retrying.");
