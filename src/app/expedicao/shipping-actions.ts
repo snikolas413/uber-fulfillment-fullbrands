@@ -70,7 +70,7 @@ async function loadLinkedOrder(supabase: Awaited<ReturnType<typeof createSupabas
   return data;
 }
 
-async function readOmieOrder(orderId: number): Promise<OmieOrderResponse["pedido_venda_produto"]> {
+async function readOmieOrder(orderId: number): Promise<NonNullable<OmieOrderResponse["pedido_venda_produto"]>> {
   const response = await callOmie<OmieOrderResponse>(
     "/produtos/pedido/",
     "ConsultarPedido",
