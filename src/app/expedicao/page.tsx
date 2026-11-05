@@ -2,7 +2,6 @@ import { redirect } from "next/navigation";
 import { MapPin, PackageCheck, ShieldCheck, Truck } from "lucide-react";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { OmieActionButton } from "@/components/omie-action-button";
-import { ShippingEditor } from "./shipping-editor";
 
 export const dynamic = "force-dynamic";
 
@@ -81,13 +80,6 @@ export default async function ShippingPage() {
                 <td><span className={`order-status order-status-${row.status}`}>{shippingLabel(row.status)}</span></td>
                 <td>
                   <OmieActionButton fulfillmentId={row.id} kind="sync-shipping" size="small" />
-                  {row.status !== "shipped" && <ShippingEditor fulfillmentId={row.id} current={{
-                    carrierId,
-                    packageCount: shipment?.package_count,
-                    freightAmount: shipment?.freight_amount,
-                    deliveryForecast: shipment?.estimated_delivery_date,
-                    modality: shipment?.service_modality,
-                  }} />}
                 </td>
               </tr>;
             })}</tbody>
