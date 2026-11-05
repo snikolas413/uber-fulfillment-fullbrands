@@ -57,12 +57,15 @@ export async function POST(request: NextRequest) {
     const redis = getOmieMfaRedis();
     const stored = await redis.set(mfaResponseKey(challengeId), code, "EX", 120, "NX");
     if (stored !== "OK") return NextResponse.json({ error: "O código já foi encaminhado. Aguarde o robô." }, { status: 409 });
-    const { error: updateError } = await admin.from("omie_shipping_jobs").update({
+    const { data: updatedJob, error: updateError } = await admin.from("omie_shipping_jobs").update({
       status: "mfa_submitted", mfa_attempts: job.mfa_attempts + 1, updated_at: new Date().toISOString(),
-    }).eq("id", job.id).eq("status", "awaiting_mfa");
-    if (updateError) {
+    }).eq("id", job.id).eq("status", "awaiting_mfa").select("id").maybeSingle();
+    if (updateError || !updatedJob) {
       await redis.del(mfaResponseKey(challengeId));
-      return NextResponse.json({ error: "Não foi possível confirmar o envio." }, { status: 503 });
+      return NextResponse.json(
+        { error: updateError ? "Não foi possível confirmar o envio." : "Esta solicitação já foi processada." },
+        { status: updateError ? 503 : 409 },
+      );
     }
     return NextResponse.json({ accepted: true }, { headers: { "Cache-Control": "no-store" } });
   } catch {
