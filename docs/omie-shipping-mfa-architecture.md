@@ -70,3 +70,12 @@ A challenge is bound to one worker job and one fulfillment. It expires automatic
 ## Open implementation dependency
 
 The Render workspace has the Next.js web service on Free and a private Key Value instance `omie-mfa-free` on Free. No Render Background Worker has been created. The project must remain on free plans only. The proposed execution host is GitHub Actions on included free minutes; its schedule and external Redis connectivity must be validated before enabling live processing. The robot account credentials must be entered directly into Render's private environment settings, never into chat or GitHub.
+
+
+## Infrastructure validation (2026-11-05)
+
+- The repository is currently **public**. GitHub documents standard GitHub-hosted Actions runners as free for public repositories. This makes Actions a viable zero-cost execution candidate while the repository remains public and the workflow uses standard hosted runners. If repository visibility changes to private, re-check the account's included minutes and billing settings before enabling execution.
+- The Render Key Value instance is confirmed available on the Free plan, but its external IP allow list is empty. Render documents that this blocks all external connections; GitHub-hosted runners cannot use the internal Render network. Do not open Redis to 0.0.0.0/0 merely to make the runner connect.
+- **Preferred MFA-channel candidate:** Supabase Realtime Broadcast using a private channel and client-library/WebSocket broadcast. Supabase documents that client-library Broadcast is delivered over WebSockets, while database-originated Broadcast is stored in realtime.messages and retained for up to 3 days. Therefore, only the client-library path is eligible for the no-persistence MFA requirement.
+- Before adopting Realtime for MFA, validate private-channel authorization for the runner identity, topic scoping to the random challenge ID, sender authorization, short-lived worker subscription, and message acknowledgement. Do not add broad policies to realtime.messages; do not use database-originated Broadcast for MFA codes.
+- No Realtime policies or settings have been changed. No GitHub Actions workflow has been enabled. No job has been executed.
