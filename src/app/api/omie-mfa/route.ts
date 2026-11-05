@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
   const user = await getOperator();
   if (!user) return NextResponse.json({ error: "Acesso não autorizado." }, { status: 401 });
   const origin = request.headers.get("origin");
-  if (origin && origin !== request.nextUrl.origin) return NextResponse.json({ error: "Origem inválida." }, { status: 403 });
+  if (origin !== request.nextUrl.origin) return NextResponse.json({ error: "Origem inválida." }, { status: 403 });
 
   const body = await request.json().catch(() => null) as { challengeId?: unknown; code?: unknown } | null;
   const challengeId = typeof body?.challengeId === "string" ? body.challengeId : "";
