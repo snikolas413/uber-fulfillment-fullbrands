@@ -7,9 +7,9 @@ for (const key of required) if (!process.env[key]) throw new Error(`Missing requ
 
 const selectors = JSON.parse(process.env.OMIE_SHIPPING_SELECTORS_JSON);
 for (const key of [
-  "email", "password", "loginSubmit", "carrier", "carrierSearch", "carrierResult",
-  "package", "packageSearch", "packageResult", "packageSave",
-  "service", "serviceResult", "serviceConfirm", "orderSave", "verification",
+  "email", "password", "loginSubmit", "carrierField",
+  "packageDialog", "packageField", "packageSave", "packageClose",
+  "serviceDialog", "serviceConfirm", "orderDialog", "orderSave", "verification",
 ]) {
   if (typeof selectors[key] !== "string" || !selectors[key].trim()) throw new Error(`OMIE_SHIPPING_SELECTORS_JSON requires selector: ${key}`);
 }
@@ -96,47 +96,51 @@ async function execute(job) {
     if (!identity.includes(String(fulfillment.omie_order_number)) && !identity.includes(String(fulfillment.omie_order_id))) {
       throw new Error("Opened Omie page does not identify the expected order; no shipping changes were made.");
     }
-    // Transportadora: abrir o seletor, pesquisar o nome completo e escolher o resultado.
-    const carrierButton = page.locator(selectors.carrier);
-    if (await carrierButton.count() !== 1) throw new Error("Expected exactly one carrier control.");
-    await carrierButton.click();
-    const carrierSearch = page.locator(selectors.carrierSearch);
-    if (await carrierSearch.count() !== 1) throw new Error("Expected exactly one carrier search field.");
-    await carrierSearch.fill(process.env.OMIE_CARRIER_VALUE);
-    const carrierResult = page.locator(selectors.carrierResult);
-    await carrierResult.waitFor({ state: "visible", timeout: 15000 });
-    if (await carrierResult.count() !== 1) throw new Error("Carrier search did not produce exactly one configured result.");
-    await carrierResult.click();
+    // Transportadora: o campo aceita digitação direta, sem abrir o modal de pesquisa.
+    const carrierField = page.locator(selectors.carrierField);
+    if (await carrierField.count() !== 1) throw new Error("Expected exactly one carrier autocomplete field.");
+    await carrierField.fill(process.env.OMIE_CARRIER_VALUE);
+    await carrierField.press("Enter");
+    await page.waitForTimeout(500);
+    const carrierValue = await carrierField.inputValue();
+    if (carrierValue.trim().toLocaleUpperCase("pt-BR") !== process.env.OMIE_CARRIER_VALUE.trim().toLocaleUpperCase("pt-BR")) {
+      throw new Error("Carrier autocomplete did not retain the configured carrier; stopping before package and freight actions.");
+    }
 
-    // Embalagem: abrir pelo ícone da caixa, pesquisar UBER, selecionar e salvar a janela.
-    const packageButton = page.locator(selectors.package);
-    if (await packageButton.count() !== 1) throw new Error("Expected exactly one package control.");
-    await packageButton.click();
-    const packageSearch = page.locator(selectors.packageSearch);
-    if (await packageSearch.count() !== 1) throw new Error("Expected exactly one package search field.");
-    await packageSearch.fill(process.env.OMIE_PACKAGE_VALUE);
-    const packageResult = page.locator(selectors.packageResult);
-    await packageResult.waitFor({ state: "visible", timeout: 15000 });
-    if (await packageResult.count() !== 1) throw new Error("Package search did not produce exactly one configured result.");
-    await packageResult.click();
-    const packageSave = page.locator(selectors.packageSave);
+    // Embalagem: localizar a janela pelo título, preencher UBER, salvar e fechar.
+    const packageDialog = page.locator(selectors.packageDialog);
+    if (await packageDialog.count() !== 1) throw new Error("Expected exactly one package dialog.");
+    const packageField = packageDialog.locator(selectors.packageField);
+    if (await packageField.count() !== 1) throw new Error("Expected exactly one package field in its dialog.");
+    await packageField.fill(process.env.OMIE_PACKAGE_VALUE);
+    await packageField.press("Enter");
+    await page.waitForFunction(({ dialogSelector, fieldSelector, expected }) => {
+      const dialog = document.querySelector(dialogSelector);
+      const field = dialog?.querySelector(fieldSelector);
+      return !!field && field.value.trim().toLocaleUpperCase("pt-BR") === expected.trim().toLocaleUpperCase("pt-BR");
+    }, { dialogSelector: selectors.packageDialog, fieldSelector: selectors.packageField, expected: process.env.OMIE_PACKAGE_VALUE }, { timeout: 15000 });
+    const packageSave = packageDialog.locator(selectors.packageSave);
     if (await packageSave.count() !== 1) throw new Error("Expected exactly one package save control.");
     await packageSave.click();
+    const packageClose = packageDialog.locator(selectors.packageClose);
+    await packageClose.waitFor({ state: "visible", timeout: 10000 });
+    if (await packageClose.count() !== 1) throw new Error("Expected exactly one package close control after saving.");
+    await packageClose.click();
+    await packageDialog.waitFor({ state: "hidden", timeout: 15000 });
 
-    // Serviço: abrir pelo ícone do caminhão, escolher Mini Envios e confirmar.
-    const serviceButton = page.locator(selectors.service);
-    if (await serviceButton.count() !== 1) throw new Error("Expected exactly one shipping service control.");
-    await serviceButton.click();
-    const serviceResult = page.locator(selectors.serviceResult);
-    await serviceResult.waitFor({ state: "visible", timeout: 15000 });
-    if (await serviceResult.count() !== 1) throw new Error("Shipping service list did not produce exactly one configured result.");
-    await serviceResult.click();
-    const serviceConfirm = page.locator(selectors.serviceConfirm);
-    if (await serviceConfirm.count() !== 1) throw new Error("Expected exactly one shipping service confirmation control.");
+    // Cotação: o Omie já apresenta a opção Mini Envios; basta confirmar, sem clicar na linha.
+    const serviceDialog = page.locator(selectors.serviceDialog);
+    if (await serviceDialog.count() !== 1) throw new Error("Expected exactly one freight quotation dialog.");
+    await serviceDialog.getByText(process.env.OMIE_SERVICE_VALUE, { exact: false }).waitFor({ state: "visible", timeout: 15000 });
+    const serviceConfirm = serviceDialog.getByText("Confirmar", { exact: true });
+    if (await serviceConfirm.count() !== 1) throw new Error("Expected exactly one freight quotation confirmation control.");
     await serviceConfirm.click();
+    await serviceDialog.waitFor({ state: "hidden", timeout: 15000 });
 
     // Gravar o pedido e confirmar os três valores na tela antes de concluir o job.
-    const orderSave = page.locator(selectors.orderSave);
+    const orderDialog = page.locator(selectors.orderDialog);
+    if (await orderDialog.count() !== 1) throw new Error("Expected exactly one main order dialog.");
+    const orderSave = orderDialog.locator(selectors.orderSave);
     if (await orderSave.count() !== 1) throw new Error("Expected exactly one order save control.");
     await orderSave.click();
     await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
