@@ -131,7 +131,7 @@ if (!jobs?.length) { console.log("No queued Omie shipping jobs."); process.exit(
 try {
   await execute(jobs[0]);
 } catch (error) {
-  console.error("Omie shipping worker stopped:", error.message);
+  console.error("Omie shipping worker stopped. Review the run metadata; page content and credentials are intentionally omitted.");
   await failJob(error);
   process.exitCode = 1;
 }
