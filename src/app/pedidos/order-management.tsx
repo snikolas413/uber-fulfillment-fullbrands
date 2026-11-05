@@ -4,7 +4,7 @@ import { useActionState, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus, ClipboardList, Search, MapPin, Package, Clock3, FileText,
-  ShieldCheck, X, LoaderCircle, AlertCircle, ChevronRight
+  ShieldCheck, X, LoaderCircle, AlertCircle
 } from "lucide-react";
 import { prepareOrderAction } from "./actions";
 import type { OrderActionState } from "./actions";
@@ -231,11 +231,11 @@ function OrderDraftModal({
   const firstRecipient = recipients[0];
   const [recipientId, setRecipientId] = useState(firstRecipient?.id ?? "");
   const selectedRecipient = recipients.find((recipient) => recipient.id === recipientId) ?? null;
-  const addresses = selectedRecipient?.delivery_addresses ?? [];
+  const addresses = selectedRecipient?.delivery_addresses;
   const [addressId, setAddressId] = useState(latestAddress(firstRecipient ?? { id: "", full_name: "", document_number: null, email: null, delivery_addresses: [] })?.id ?? "");
   const [customerEmail, setCustomerEmail] = useState(firstRecipient?.email ?? "");
 
-  const orderedAddresses = useMemo(() => [...addresses].sort(
+  const orderedAddresses = useMemo(() => [...(addresses ?? [])].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   ), [addresses]);
   const selectedAddress = orderedAddresses.find((address) => address.id === addressId) ?? orderedAddresses[0] ?? null;
