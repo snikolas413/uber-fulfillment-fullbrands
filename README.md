@@ -19,7 +19,7 @@ https://uber-fulfillment-fullbrands.onrender.com
 - Expedição: sincronização do frete e rastreio registrados pelo Omie após usar a integração Correios do próprio ERP
 - Histórico: consulta de auditoria para perfis admin e gestor
 
-O app se integra ao Omie exclusivamente no servidor. O pedido pode ser criado com ação explícita; faturamento exige confirmação separada. A cotação, etiqueta e postagem são executadas pela integração Correios já configurada no Omie. O app apenas lê os dados resultantes do ERP.
+O app se integra ao Omie exclusivamente no servidor. O pedido pode ser criado com ação explícita; faturamento exige confirmação separada. A cotação, etiqueta e postagem são executadas pela integração Correios já configurada no Omie. O app apenas lê os dados resultantes do ERP. A automação assistida de configuração logística via navegador, incluindo MFA, está em desenvolvimento isolado na branch `feature/omie-shipping-playwright`; consulte [a arquitetura e os controles de segurança](docs/omie-shipping-mfa-architecture.md).
 
 ## Executar localmente
 ```bash
