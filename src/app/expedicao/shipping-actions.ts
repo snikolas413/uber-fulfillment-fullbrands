@@ -84,6 +84,7 @@ async function readOmieOrder(orderId: number): Promise<OmieOrderResponse["pedido
 }
 
 function validateInput(input: ShippingInput) {
+  if (!["0", "1", "2"].includes(input.modality)) throw new Error("Selecione quem será responsável pelo frete.");
   if (!Number.isInteger(input.carrierId) || input.carrierId <= 0) throw new Error("Selecione uma transportadora válida.");
   if (!input.packageDescription.trim() || input.packageDescription.trim().length > 60) {
     throw new Error("Informe a embalagem com até 60 caracteres.");
@@ -175,6 +176,20 @@ export async function updateOmieShippingAction(id: string, input: ShippingInput)
     if (!verified) {
       throw new Error("O Omie recebeu a solicitação, mas a conferência posterior não confirmou todos os campos. Consulte o pedido no ERP antes de tentar novamente.");
     }
+
+    const { error: shipmentError } = await supabase.from("shipments").upsert({
+      fulfillment_id: id,
+      carrier_id: String(input.carrierId),
+      package_count: input.packageCount,
+      service_modality: input.modality,
+      freight_amount: Math.round(input.freightAmount * 100) / 100,
+      estimated_delivery_date: (() => {
+        const [day, month, year] = input.deliveryForecast.split("/");
+        return `${year}-${month}-${day}`;
+      })(),
+      omie_last_sync_at: new Date().toISOString(),
+    }, { onConflict: "fulfillment_id" });
+    if (shipmentError) throw new Error("O frete foi atualizado no Omie, mas não foi possível sincronizar os dados locais. Use Sincronizar frete antes de repetir a operação.");
 
     const { error: auditError } = await supabase.from("audit_logs").insert({
       actor_id: userId,
