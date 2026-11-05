@@ -29,8 +29,11 @@ export function OmieMfaChallenge() {
   useEffect(() => {
     if (!challenge) return;
     const delay = Date.parse(challenge.expiresAt) - Date.now();
-    if (delay <= 0) { setChallenge(null); setCode(""); return; }
-    const timer = window.setTimeout(() => { setChallenge(null); setCode(""); setError("O prazo do código terminou. O robô precisará solicitar outro."); }, delay);
+    const timer = window.setTimeout(() => {
+      setChallenge(null);
+      setCode("");
+      setError("O prazo do código terminou. O robô precisará solicitar outro.");
+    }, Math.max(delay, 0));
     return () => window.clearTimeout(timer);
   }, [challenge]);
 
