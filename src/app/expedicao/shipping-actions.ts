@@ -142,7 +142,10 @@ export async function updateOmieShippingAction(id: string, input: ShippingInput)
     const row = await loadLinkedOrder(supabase, id);
     const before = await readOmieOrder(row.omie_order_id!);
     const integrationCode = before.cabecalho?.codigo_pedido_integracao;
-    if (!integrationCode) throw new Error("O pedido não possui código de integração. Alteração bloqueada para evitar atingir outro registro.");
+    const expectedIntegrationCode = "UFB-" + id.replace(/-/g, "");
+    if (!integrationCode || integrationCode !== expectedIntegrationCode) {
+      throw new Error("O código de integração do pedido no Omie não corresponde ao pedido local. Alteração bloqueada para evitar atingir outro registro.");
+    }
 
     await callOmie<Record<string, unknown>>(
       "/produtos/pedido/",
