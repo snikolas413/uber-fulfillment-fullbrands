@@ -83,9 +83,11 @@ The Render workspace has the Next.js web service on Free and a private Key Value
 ## Durable worker leases
 
 Migration `202611050005_omie_shipping_job_leases.sql` adds worker ownership and heartbeat timestamps plus server-only RPCs:
-- `claim_omie_shipping_job`: atomically claims the oldest queued job with `FOR UPDATE SKIP LOCKED`; it can reclaim a running job only after a 10-minute stale heartbeat.
+- `claim_omie_shipping_job`: atomically claims the oldest queued job with `FOR UPDATE SKIP LOCKED`; it can reclaim a running, MFA-waiting or MFA-submitted job only after a 10-minute stale heartbeat. Reclaiming clears the old challenge so a crashed worker cannot leave a stale MFA prompt active.
 - `heartbeat_omie_shipping_job`: renews the lease only for the matching worker and an active state.
 - `set_omie_shipping_mfa_challenge`: binds a random challenge to the current worker and limits its expiry to at most 5 minutes.
 - `complete_omie_shipping_job` and `fail_omie_shipping_job`: close only jobs owned by the calling worker.
 
 All five RPCs are executable by `service_role` only. Verification confirmed authenticated users cannot execute them. No job was enqueued or claimed.
+
+Migration `202611050006_omie_shipping_recover_stale_mfa.sql` extends the stale-lease recovery path to `awaiting_mfa` and `mfa_submitted`, preventing orphaned challenges after a runner crash.
