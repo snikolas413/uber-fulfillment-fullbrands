@@ -20,7 +20,7 @@ Variables:
 - `OMIE_SERVICE_VALUE` = `CORREIOS MINI ENVIOS CTR AG`
 
 `OMIE_SHIPPING_SELECTORS_JSON` must contain exact CSS/Playwright selectors observed in the authorized Omie account:
-- `email`, `password`, `loginSubmit`
+- `email`, `loginContinue`, `password`, `loginSubmit`
 - `carrierField`: the direct autocomplete field, observed as `input[title="Transportadora"]`. Do not open the carrier search modal. Fill the carrier name, press Enter, and verify the field retained the exact configured value.
 - `packageTrigger`: box icon that opens the package dialog, observed as `a.oLink.omie-link-wrapper:has(i.fal.fa-cube)` (tooltip: “Clique aqui para selecionar as embalagens utilizadas”)
 - `packageDialog`: dialog identified by the title, e.g. `.ui-igdialog:has-text("Embalagem utilizada no Pedido de Venda")`
@@ -34,7 +34,7 @@ Variables:
 - `orderSave`: observed as `a.ui-toolbar-item.SAVE`, scoped inside the main order dialog
 - `verification`: locator whose visible text contains the persisted carrier, package, and service values after saving.
 
-Optional selectors: `mfaIndicator`, `mfaCode`, `mfaSubmit`, and `orderIdentity`. Do not use dynamic dialog IDs such as `dialog-51595` or dynamic input IDs such as `d51595...`.
+Login is a confirmed two-step flow: `email` = `input#email`; `loginContinue` = `button#btn-continue`; after clicking Continue, wait for the visible password field `password` = `input#current-password`; then submit with `loginSubmit` = `button#btn-login`. Do not use the hidden `input[name="hiddenPassword"]` from the first screen. The robot email/password must remain in GitHub Actions secrets and must never be pasted into chat.\n\nOptional selectors: `mfaIndicator`, `mfaCode`, `mfaSubmit`, and `orderIdentity`. Do not use dynamic dialog IDs such as `dialog-51595` or dynamic input IDs such as `d51595...`.
 
 ## Validated UI sequence
 
