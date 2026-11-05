@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { OrderManagement, type OrderDraft, type OrderRecipient } from "./order-management";
+import { OmieMfaChallenge } from "@/components/omie-mfa-challenge";
 
 export const dynamic = "force-dynamic";
 
@@ -35,11 +36,14 @@ export default async function OrdersPage() {
   const canWrite = ["admin", "gestor", "operador"].includes(profile.role);
 
   return (
+    <>
+    <OmieMfaChallenge />
     <OrderManagement
       recipients={recipients}
       drafts={drafts}
       canWrite={canWrite}
       loadError={recipientResult.error || fulfillmentResult.error ? "Não foi possível carregar todos os dados. Atualize a página e confira a conexão." : null}
     />
+    </>
   );
 }
