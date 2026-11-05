@@ -7,7 +7,7 @@ for (const key of required) if (!process.env[key]) throw new Error(`Missing requ
 
 const selectors = JSON.parse(process.env.OMIE_SHIPPING_SELECTORS_JSON);
 for (const key of [
-  "email", "password", "loginSubmit", "carrierField",
+  "email", "loginContinue", "password", "loginSubmit", "carrierField",
   "packageTrigger", "packageDialog", "packageField", "packageSave", "packageClose",
   "serviceTrigger", "serviceDialog", "serviceConfirm", "orderDialog", "orderSave", "verification",
 ]) {
@@ -82,9 +82,20 @@ async function execute(job) {
   const page = await context.newPage();
   try {
     await page.goto(process.env.OMIE_LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
-    await page.locator(selectors.email).fill(process.env.OMIE_ROBOT_EMAIL);
-    await page.locator(selectors.password).fill(process.env.OMIE_ROBOT_PASSWORD);
-    await page.locator(selectors.loginSubmit).click();
+    // Omie autentica em duas etapas: e-mail/Continuar e, depois, senha/Entrar.
+    const emailField = page.locator(selectors.email);
+    if (await emailField.count() !== 1) throw new Error("Expected exactly one Omie email field.");
+    await emailField.fill(process.env.OMIE_ROBOT_EMAIL);
+    const loginContinue = page.locator(selectors.loginContinue);
+    if (await loginContinue.count() !== 1) throw new Error("Expected exactly one Omie Continue control.");
+    await loginContinue.click();
+    const passwordField = page.locator(selectors.password);
+    await passwordField.waitFor({ state: "visible", timeout: 20000 });
+    if (await passwordField.count() !== 1) throw new Error("Expected exactly one visible Omie password field after email step.");
+    await passwordField.fill(process.env.OMIE_ROBOT_PASSWORD);
+    const loginSubmit = page.locator(selectors.loginSubmit);
+    if (await loginSubmit.count() !== 1) throw new Error("Expected exactly one Omie login submit control.");
+    await loginSubmit.click();
     await page.waitForLoadState("domcontentloaded", { timeout: 30000 }).catch(() => {});
     const mfaSelector = selectors.mfaIndicator || 'input[autocomplete="one-time-code"]';
     if (await page.locator(mfaSelector).count()) await waitForMfa(page);
