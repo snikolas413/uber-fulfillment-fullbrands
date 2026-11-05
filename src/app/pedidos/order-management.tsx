@@ -9,6 +9,7 @@ import {
 import { prepareOrderAction } from "./actions";
 import type { OrderActionState } from "./actions";
 import { OmieActionButton } from "@/components/omie-action-button";
+import { OmieShippingQueueButton } from "@/components/omie-shipping-queue-button";
 
 type Address = {
   id: string;
@@ -42,6 +43,7 @@ type OrderItem = {
 export type OrderDraft = {
   id: string;
   status: string;
+  omie_order_id: number | null;
   omie_order_number: string | null;
   customer_purchase_order: string | null;
   customer_email: string | null;
@@ -184,7 +186,7 @@ export function OrderManagement({
                       <td><strong>{formatCurrency(Number(item?.line_total ?? Number(item?.quantity ?? 0) * Number(item?.unit_price ?? 0)))}</strong></td>
                       <td><span className={`order-status order-status-${draft.status}`}>{statusLabel(draft.status)}</span></td>
                       <td><span className="orders-date"><Clock3 size={12} />{formatDate(draft.created_at)}</span></td>
-                      <td>{canWrite && draft.status === "ready" && <OmieActionButton fulfillmentId={draft.id} kind="send" size="small" />}{canWrite && (draft.status === "order_pending" || draft.status === "error") && <OmieActionButton fulfillmentId={draft.id} kind="send" size="small" />}{canWrite && ["order_created", "billing_pending", "billed"].includes(draft.status) && <OmieActionButton fulfillmentId={draft.id} kind="sync-order" size="small" />}{!canWrite && "Somente consulta"}</td>
+                      <td>{canWrite && draft.status === "ready" && <OmieActionButton fulfillmentId={draft.id} kind="send" size="small" />}{canWrite && (draft.status === "order_pending" || draft.status === "error") && <OmieActionButton fulfillmentId={draft.id} kind="send" size="small" />}{canWrite && ["order_created", "billing_pending", "billed", "shipping_pending"].includes(draft.status) && <OmieActionButton fulfillmentId={draft.id} kind="sync-order" size="small" />}{canWrite && draft.omie_order_id && ["order_created", "billing_pending", "billed", "shipping_pending"].includes(draft.status) && <OmieShippingQueueButton fulfillmentId={draft.id} />}{canWrite && draft.status === "shipping_pending" && <OmieActionButton fulfillmentId={draft.id} kind="sync-shipping" size="small" />}{!canWrite && "Somente consulta"}</td>
                     </tr>
                   );
                 })}
