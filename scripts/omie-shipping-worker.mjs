@@ -8,8 +8,8 @@ for (const key of required) if (!process.env[key]) throw new Error(`Missing requ
 const selectors = JSON.parse(process.env.OMIE_SHIPPING_SELECTORS_JSON);
 for (const key of [
   "email", "password", "loginSubmit", "carrierField",
-  "packageDialog", "packageField", "packageSave", "packageClose",
-  "serviceDialog", "serviceConfirm", "orderDialog", "orderSave", "verification",
+  "packageTrigger", "packageDialog", "packageField", "packageSave", "packageClose",
+  "serviceTrigger", "serviceDialog", "serviceConfirm", "orderDialog", "orderSave", "verification",
 ]) {
   if (typeof selectors[key] !== "string" || !selectors[key].trim()) throw new Error(`OMIE_SHIPPING_SELECTORS_JSON requires selector: ${key}`);
 }
@@ -107,8 +107,12 @@ async function execute(job) {
       throw new Error("Carrier autocomplete did not retain the configured carrier; stopping before package and freight actions.");
     }
 
-    // Embalagem: localizar a janela pelo título, preencher UBER, salvar e fechar.
+    // Embalagem: abrir pelo ícone da caixa, preencher UBER, salvar e fechar.
+    const packageTrigger = page.locator(selectors.packageTrigger);
+    if (await packageTrigger.count() !== 1) throw new Error("Expected exactly one package trigger.");
+    await packageTrigger.click();
     const packageDialog = page.locator(selectors.packageDialog);
+    await packageDialog.waitFor({ state: "visible", timeout: 15000 });
     if (await packageDialog.count() !== 1) throw new Error("Expected exactly one package dialog.");
     const packageField = packageDialog.locator(selectors.packageField);
     if (await packageField.count() !== 1) throw new Error("Expected exactly one package field in its dialog.");
@@ -127,8 +131,12 @@ async function execute(job) {
     await packageClose.click();
     await packageDialog.waitFor({ state: "hidden", timeout: 15000 });
 
-    // Cotação: o Omie já apresenta a opção Mini Envios; basta confirmar, sem clicar na linha.
+    // Cotação: abrir pelo ícone do caminhão; o Omie já apresenta Mini Envios, basta confirmar.
+    const serviceTrigger = page.locator(selectors.serviceTrigger);
+    if (await serviceTrigger.count() !== 1) throw new Error("Expected exactly one freight quotation trigger.");
+    await serviceTrigger.click();
     const serviceDialog = page.locator(selectors.serviceDialog);
+    await serviceDialog.waitFor({ state: "visible", timeout: 15000 });
     if (await serviceDialog.count() !== 1) throw new Error("Expected exactly one freight quotation dialog.");
     await serviceDialog.getByText(process.env.OMIE_SERVICE_VALUE, { exact: false }).waitFor({ state: "visible", timeout: 15000 });
     const serviceConfirm = serviceDialog.getByText("Confirmar", { exact: true });
