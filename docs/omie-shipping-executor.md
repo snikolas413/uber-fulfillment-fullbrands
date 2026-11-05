@@ -22,10 +22,12 @@ Variables:
 `OMIE_SHIPPING_SELECTORS_JSON` must contain exact CSS/Playwright selectors observed in the authorized Omie account:
 - `email`, `password`, `loginSubmit`
 - `carrierField`: the direct autocomplete field, observed as `input[title="Transportadora"]`. Do not open the carrier search modal. Fill the carrier name, press Enter, and verify the field retained the exact configured value.
+- `packageTrigger`: box icon that opens the package dialog
 - `packageDialog`: dialog identified by the title, e.g. `.ui-igdialog:has-text("Embalagem utilizada no Pedido de Venda")`
 - `packageField`: observed as `input[title="Embalagem"]`
 - `packageSave`: observed as `a.ui-toolbar-item.SAVE`, scoped inside the package dialog
 - `packageClose`: observed as `button.ui-igdialog-buttonclose`, scoped inside the package dialog
+- `serviceTrigger`: truck icon beside the freight amount that opens the quotation dialog
 - `serviceDialog`: quotation dialog, e.g. `.ui-igdialog:has-text("Cotação do Frete")`
 - `serviceConfirm`: text selector for the exact `Confirmar` action, scoped inside the quotation dialog
 - `orderDialog`: main order dialog, e.g. `.ui-igdialog:has-text("Pedido de Venda Nº")`
