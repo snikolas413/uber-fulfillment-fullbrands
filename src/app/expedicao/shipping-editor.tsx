@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { previewOmieShippingAction, updateOmieShippingAction } from "./shipping-actions";
 
 type Props = {
@@ -26,6 +27,7 @@ function dateToOmie(value: string) {
 }
 
 export function ShippingEditor({ fulfillmentId, current }: Props) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [carrierId, setCarrierId] = useState(String(current?.carrierId ?? ""));
   const [packageDescription, setPackageDescription] = useState(current?.packageDescription ?? "");
@@ -50,6 +52,7 @@ export function ShippingEditor({ fulfillmentId, current }: Props) {
         setDeliveryForecast(dateToInput(String(value.deliveryForecast ?? "")));
         const currentModality = String(value.modality ?? "");
         setModality(currentModality === "0" || currentModality === "1" || currentModality === "2" ? currentModality : "");
+        setConfirmed(false);
       }
     });
   }
@@ -70,20 +73,21 @@ export function ShippingEditor({ fulfillmentId, current }: Props) {
       setMessage(result.message);
       if (result.status === "success") {
         setConfirmed(false);
+        router.refresh();
       }
     });
   }
 
   return (
     <section className="shipping-editor">
-      <button type="button" className="button button-secondary" onClick={() => setOpen((value) => !value)}>
+      <button type="button" className="omie-action-button" onClick={() => setOpen((value) => !value)}>
         {open ? "Fechar edição de frete" : "Editar dados de frete"}
       </button>
       {open && (
-        <form className="panel" onSubmit={submit}>
+        <form className="panel shipping-editor-form" onSubmit={submit}>
           <div className="section-kicker">ATUALIZAÇÃO CONTROLADA NO OMIE</div>
-          <p>Esta ação altera somente os dados de frete do pedido existente. Não cota, contrata, gera etiqueta, fatura ou posta.</p>
-          <button type="button" className="button button-secondary" onClick={preview} disabled={isPending}>
+          <p>Altera somente os dados de frete do pedido existente. Não cota, contrata, gera etiqueta, fatura ou posta.</p>
+          <button type="button" className="omie-action-button" onClick={preview} disabled={isPending}>
             Consultar valores atuais no Omie
           </button>
           <label>
@@ -119,7 +123,7 @@ export function ShippingEditor({ fulfillmentId, current }: Props) {
             <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
             Conferi transportadora, embalagem, volumes, valor, previsão e responsável pelo frete. Autorizo gravar esses dados no pedido existente do Omie.
           </label>
-          <button type="submit" className="button button-primary" disabled={isPending || !confirmed}>
+          <button type="submit" className="omie-action-button" disabled={isPending || !confirmed}>
             {isPending ? "Processando..." : "Confirmar e atualizar frete no Omie"}
           </button>
           {message && <p role="status">{message}</p>}
