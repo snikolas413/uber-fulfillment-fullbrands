@@ -139,7 +139,7 @@ async function execute(job) {
     await serviceDialog.waitFor({ state: "visible", timeout: 15000 });
     if (await serviceDialog.count() !== 1) throw new Error("Expected exactly one freight quotation dialog.");
     await serviceDialog.getByText(process.env.OMIE_SERVICE_VALUE, { exact: false }).waitFor({ state: "visible", timeout: 15000 });
-    const serviceConfirm = serviceDialog.getByText("Confirmar", { exact: true });
+    const serviceConfirm = serviceDialog.locator(selectors.serviceConfirm);
     if (await serviceConfirm.count() !== 1) throw new Error("Expected exactly one freight quotation confirmation control.");
     await serviceConfirm.click();
     await serviceDialog.waitFor({ state: "hidden", timeout: 15000 });
