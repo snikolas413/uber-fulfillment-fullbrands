@@ -79,3 +79,13 @@ The Render workspace has the Next.js web service on Free and a private Key Value
 - **Preferred MFA-channel candidate:** Supabase Realtime Broadcast using a private channel and client-library/WebSocket broadcast. Supabase documents that client-library Broadcast is delivered over WebSockets, while database-originated Broadcast is stored in realtime.messages and retained for up to 3 days. Therefore, only the client-library path is eligible for the no-persistence MFA requirement.
 - Before adopting Realtime for MFA, validate private-channel authorization for the runner identity, topic scoping to the random challenge ID, sender authorization, short-lived worker subscription, and message acknowledgement. Do not add broad policies to realtime.messages; do not use database-originated Broadcast for MFA codes.
 - No Realtime policies or settings have been changed. No GitHub Actions workflow has been enabled. No job has been executed.
+
+## Durable worker leases
+
+Migration `202611050005_omie_shipping_job_leases.sql` adds worker ownership and heartbeat timestamps plus server-only RPCs:
+- `claim_omie_shipping_job`: atomically claims the oldest queued job with `FOR UPDATE SKIP LOCKED`; it can reclaim a running job only after a 10-minute stale heartbeat.
+- `heartbeat_omie_shipping_job`: renews the lease only for the matching worker and an active state.
+- `set_omie_shipping_mfa_challenge`: binds a random challenge to the current worker and limits its expiry to at most 5 minutes.
+- `complete_omie_shipping_job` and `fail_omie_shipping_job`: close only jobs owned by the calling worker.
+
+All five RPCs are executable by `service_role` only. Verification confirmed authenticated users cannot execute them. No job was enqueued or claimed.
