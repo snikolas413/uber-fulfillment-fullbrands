@@ -70,17 +70,14 @@ export default async function ShippingPage() {
               const shipment = firstRelation(row.shipments);
               const invoice = firstRelation(row.invoices);
               const address = row.delivery_addresses;
-              const carrierId = shipment?.carrier_id && /^\d+$/.test(shipment.carrier_id) ? Number(shipment.carrier_id) : null;
               return <tr key={row.id}>
                 <td><strong>{row.recipients?.full_name ?? "Destinatário indisponível"}</strong><small>{new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(new Date(row.created_at))}</small></td>
                 <td>{address ? `${address.city}/${address.state} · ${address.postal_code}` : "Endereço indisponível"}</td>
                 <td>{invoice?.omie_invoice_number || "—"}</td>
-                <td>{shipment?.tracking_code ? <><strong>{shipment.tracking_code}</strong>{shipment.tracking_url && <small><a href={shipment.tracking_url} target="_blank" rel="noreferrer">Acompanhar entrega</a></small></> : "Aguardando código"}</td>
+                <td>{shipment?.tracking_code ? <span><strong>{shipment.tracking_code}</strong>{shipment.tracking_url ? <small><a href={shipment.tracking_url} target="_blank" rel="noreferrer">Acompanhar entrega</a></small> : null}</span> : "Aguardando código"}</td>
                 <td><strong>{shipment?.estimated_delivery_date ? new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(new Date(shipment.estimated_delivery_date + "T12:00:00")) : "—"}</strong><small>{shipment?.freight_amount != null ? new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(shipment.freight_amount)) : "Frete não informado"}</small><small>{shipment?.package_count ? `${shipment.package_count} volume(s)` : ""}</small></td>
                 <td><span className={`order-status order-status-${row.status}`}>{shippingLabel(row.status)}</span></td>
-                <td>
-                  <OmieActionButton fulfillmentId={row.id} kind="sync-shipping" size="small" />
-                </td>
+                <td><OmieActionButton fulfillmentId={row.id} kind="sync-shipping" size="small" /></td>
               </tr>;
             })}</tbody>
           </table></div>
