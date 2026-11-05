@@ -26,10 +26,11 @@ This document defines the implementation boundary for completing the Omie shippi
 
 ## Proposed architecture
 
-- **Next.js web service:** authenticated server actions/API routes create a shipping job, expose its non-secret status, and submit the one-time code.
-- **Supabase:** stores durable shipping job metadata and audit-safe state only. RLS stays enabled. No MFA code is stored here.
-- **Render Key Value:** private transient handoff between web service and worker. Challenge keys use TTL and one-time consumption.
-- **Render Background Worker:** one browser job at a time initially; Playwright Chromium; graceful SIGTERM handling; bounded retries; explicit checkpoints.
+- **Next.js web service:** authenticated server actions/API routes create a shipping job, expose its non-secret status, and submit the one-time code. Enqueue is a single insert into `omie_shipping_jobs`, idempotent while an active job exists.
+- **Supabase:** the durable queue and source of truth for job state. A runner claims the oldest `queued` row with a conditional update and `RETURNING`; only the process that changes the row may execute it. RLS stays enabled. No MFA code is stored here.
+- **Free-tier constraint:** do not provision a paid Render Background Worker or any paid datastore. First implement a runner that can be invoked by the existing web service and processes one job at a time, with a strict execution timeout and durable checkpoints. Because a free web instance may sleep/restart and is not a guaranteed worker, this is best-effort until a reliable free execution host is explicitly validated.
+- **MFA handoff:** keep the code transient and one-time. Prefer an in-process handoff only when the same live process owns the browser session; do not pretend a separate web process can read another process's memory. If a free private Key Value plan is available in the account, validate its limits and availability before using it. Never silently upgrade to a paid plan.
+- **Browser automation:** Playwright Chromium runs only within the permitted free execution budget. No persistent browser profile or cookies are stored.
 - **Omie:** remains the system of record for carrier, package, service, freight quote, label and tracking. Do not guess service codes or generate labels automatically during the first milestone.
 
 ## State model
@@ -59,7 +60,7 @@ A challenge is bound to one worker job and one fulfillment. It expires automatic
 ## Delivery sequence
 
 1. Implement and test the transient MFA channel and UI without connecting a live Omie account.
-2. Add the worker skeleton, queue lifecycle, health checks and graceful shutdown.
+2. Add the runner skeleton, atomic Supabase claim, bounded execution, health checks and graceful shutdown. Do not provision paid infrastructure.
 3. Add Playwright login and MFA detection against an explicitly approved test account/session.
 4. Validate navigation and selectors on a non-production/test order; collect redacted evidence.
 5. Add package `UBER`, Correios and `Mini Envios` selection only after confirming the exact labels and behavior in the actual Omie account.
@@ -67,4 +68,4 @@ A challenge is bound to one worker job and one fulfillment. It expires automatic
 
 ## Open implementation dependency
 
-The current Render workspace has the Next.js web service but no background worker or private Key Value instance. Infrastructure creation and deployment are intentionally deferred until the worker code, branch Blueprint and cost/plan are reviewed. The robot account credentials must be entered directly into Render's private environment settings, never into chat or GitHub.
+The current Render workspace has the Next.js web service but no background worker or private Key Value instance. The project must remain on free plans only. A Render Background Worker is not assumed to be free; do not create one. Infrastructure creation and deployment are deferred until a free-only execution and MFA transport design is verified. The robot account credentials must be entered directly into Render's private environment settings, never into chat or GitHub.
