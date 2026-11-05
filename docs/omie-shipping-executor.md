@@ -22,14 +22,14 @@ Variables:
 `OMIE_SHIPPING_SELECTORS_JSON` must contain exact CSS/Playwright selectors observed in the authorized Omie account:
 - `email`, `password`, `loginSubmit`
 - `carrierField`: the direct autocomplete field, observed as `input[title="Transportadora"]`. Do not open the carrier search modal. Fill the carrier name, press Enter, and verify the field retained the exact configured value.
-- `packageTrigger`: box icon that opens the package dialog
+- `packageTrigger`: box icon that opens the package dialog, observed as `a.oLink.omie-link-wrapper:has(i.fal.fa-cube)` (tooltip: “Clique aqui para selecionar as embalagens utilizadas”)
 - `packageDialog`: dialog identified by the title, e.g. `.ui-igdialog:has-text("Embalagem utilizada no Pedido de Venda")`
 - `packageField`: observed as `input[title="Embalagem"]`
 - `packageSave`: observed as `a.ui-toolbar-item.SAVE`, scoped inside the package dialog
 - `packageClose`: observed as `button.ui-igdialog-buttonclose`, scoped inside the package dialog
-- `serviceTrigger`: truck icon beside the freight amount that opens the quotation dialog
+- `serviceTrigger`: truck icon beside the freight amount that opens the quotation dialog, observed as `a.oLink.omie-link-wrapper:has(i.fal.fa-truck)` (tooltip: “Clique aqui para selecionar uma opção de entrega de frete”)
 - `serviceDialog`: quotation dialog, e.g. `.ui-igdialog:has-text("Cotação do Frete")`
-- `serviceConfirm`: text selector for the exact `Confirmar` action, scoped inside the quotation dialog
+- `serviceConfirm`: selector for the exact `Confirmar` action, scoped inside the quotation dialog; the worker uses this configured selector
 - `orderDialog`: main order dialog, e.g. `.ui-igdialog:has-text("Pedido de Venda Nº")`
 - `orderSave`: observed as `a.ui-toolbar-item.SAVE`, scoped inside the main order dialog
 - `verification`: locator whose visible text contains the persisted carrier, package, and service values after saving.
