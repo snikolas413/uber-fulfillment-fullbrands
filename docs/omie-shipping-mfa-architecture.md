@@ -28,9 +28,10 @@ This document defines the implementation boundary for completing the Omie shippi
 
 - **Next.js web service:** authenticated server actions/API routes create a shipping job, expose its non-secret status, and submit the one-time code. Enqueue is a single insert into `omie_shipping_jobs`, idempotent while an active job exists.
 - **Supabase:** the durable queue and source of truth for job state. A runner claims the oldest `queued` row with a conditional update and `RETURNING`; only the process that changes the row may execute it. RLS stays enabled. No MFA code is stored here.
-- **Free-tier constraint:** do not provision a paid Render Background Worker or any paid datastore. First implement a runner that can be invoked by the existing web service and processes one job at a time, with a strict execution timeout and durable checkpoints. Because a free web instance may sleep/restart and is not a guaranteed worker, this is best-effort until a reliable free execution host is explicitly validated.
-- **MFA handoff:** keep the code transient and one-time. Prefer an in-process handoff only when the same live process owns the browser session; do not pretend a separate web process can read another process's memory. If a free private Key Value plan is available in the account, validate its limits and availability before using it. Never silently upgrade to a paid plan.
-- **Browser automation:** Playwright Chromium runs only within the permitted free execution budget. No persistent browser profile or cookies are stored.
+- **Free-tier constraint:** do not provision a paid Render Background Worker or any paid datastore. The existing Render web service may sleep/restart and must not be treated as a reliable daemon.
+- **Free execution host candidate:** use a scheduled GitHub Actions workflow (minimum practical cadence, initially every 5 minutes) to poll and claim one job at a time, subject to the repository's included Actions minutes and concurrency limits. The workflow must use only GitHub-hosted runners within the free allowance. If the free allowance is exhausted, jobs remain queued; never switch to paid runners or enable billing automatically.
+- **MFA handoff:** the Render Key Value instance `omie-mfa-free` is provisioned on the Free plan with `noeviction`, persistence disabled and no public IP allow-list entries. The web app writes the MFA response with a short TTL and one-time key; the Actions runner consumes it through a private/authenticated connection. Configure the connection URL as a GitHub Actions secret and the web service's environment variable through Render's secret settings. Never put connection URLs in source control or logs. Verify whether the free instance exposes an external TLS endpoint before implementing the runner; do not expose an unauthenticated endpoint.
+- **Browser automation:** Playwright Chromium runs only within the permitted GitHub Actions free-minute budget. No persistent browser profile or cookies are stored.
 - **Omie:** remains the system of record for carrier, package, service, freight quote, label and tracking. Do not guess service codes or generate labels automatically during the first milestone.
 
 ## State model
@@ -60,7 +61,7 @@ A challenge is bound to one worker job and one fulfillment. It expires automatic
 ## Delivery sequence
 
 1. Implement and test the transient MFA channel and UI without connecting a live Omie account.
-2. Add the runner skeleton, atomic Supabase claim, bounded execution, health checks and graceful shutdown. Do not provision paid infrastructure.
+2. Add a scheduled GitHub Actions runner skeleton, atomic Supabase claim, bounded execution and safe cancellation. Confirm included free Actions minutes before enabling the schedule. Do not provision paid infrastructure.
 3. Add Playwright login and MFA detection against an explicitly approved test account/session.
 4. Validate navigation and selectors on a non-production/test order; collect redacted evidence.
 5. Add package `UBER`, Correios and `Mini Envios` selection only after confirming the exact labels and behavior in the actual Omie account.
@@ -68,4 +69,4 @@ A challenge is bound to one worker job and one fulfillment. It expires automatic
 
 ## Open implementation dependency
 
-The current Render workspace has the Next.js web service but no background worker or private Key Value instance. The project must remain on free plans only. A Render Background Worker is not assumed to be free; do not create one. Infrastructure creation and deployment are deferred until a free-only execution and MFA transport design is verified. The robot account credentials must be entered directly into Render's private environment settings, never into chat or GitHub.
+The Render workspace has the Next.js web service on Free and a private Key Value instance `omie-mfa-free` on Free. No Render Background Worker has been created. The project must remain on free plans only. The proposed execution host is GitHub Actions on included free minutes; its schedule and external Redis connectivity must be validated before enabling live processing. The robot account credentials must be entered directly into Render's private environment settings, never into chat or GitHub.
