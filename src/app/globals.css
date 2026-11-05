@@ -200,3 +200,17 @@
 .omie-action-result-warning{color:#987536}
 .omie-action-result-error{color:#a2483e}
 @media(max-width:760px){.omie-action-wrap{max-width:180px}.omie-action-button{white-space:normal;text-align:left}}
+
+
+/* Assisted Omie MFA */
+.omie-mfa-modal{width:min(100%,470px)}
+.omie-mfa-lock{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;background:#f2f5e9;color:#6f8439}
+.omie-mfa-status{display:flex;align-items:flex-start;gap:10px;padding:13px;border:1px solid #e7edd9;border-radius:8px;background:#f8faf4;color:#71853d}
+.omie-mfa-status strong,.omie-mfa-status small{display:block}
+.omie-mfa-status strong{color:#4d6030;font-size:11px}
+.omie-mfa-status small{margin-top:5px;color:#87917c;font-size:9px;line-height:1.45}
+.omie-mfa-label{display:block;margin:17px 0 7px;color:#596164;font-size:10px;font-weight:700}
+.omie-mfa-input{width:100%;height:46px;padding:0 13px;border:1px solid #dfe4dd;border-radius:7px;outline:0;font:inherit;font-size:17px;letter-spacing:.18em;text-align:center}
+.omie-mfa-input:focus{border-color:#91a54b;box-shadow:0 0 0 3px rgba(145,165,75,.13)}
+.omie-mfa-notice{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;padding:13px 15px;border:1px solid #e5eadb;border-radius:8px;background:#f8faf4;color:#536b31}
+.omie-mfa-notice strong{font-size:11px}.omie-mfa-notice p{margin:4px 0 0;color:#77836d;font-size:10px}
