@@ -34,16 +34,19 @@ Variables:
 - `orderSave`: observed as `a.ui-toolbar-item.SAVE`, scoped inside the main order dialog
 - `verification`: locator whose visible text contains the persisted carrier, package, and service values after saving.
 
-Login is a confirmed two-step flow: `email` = `input#email`; `loginContinue` = `button#btn-continue`; after clicking Continue, wait for the visible password field `password` = `input#current-password`; then submit with `loginSubmit` = `button#btn-login`. Do not use the hidden `input[name="hiddenPassword"]` from the first screen. The robot email/password must remain in GitHub Actions secrets and must never be pasted into chat.\n\nOptional selectors: `mfaIndicator`, `mfaCode`, `mfaSubmit`, and `orderIdentity`. Do not use dynamic dialog IDs such as `dialog-51595` or dynamic input IDs such as `d51595...`.
+Login is a confirmed two-step flow: `email` = `input#email`; `loginContinue` = `button#btn-continue`; after clicking Continue, wait for the visible password field `password` = `input#current-password`; then submit with `loginSubmit` = `button#btn-login`. Do not use the hidden `input[name="hiddenPassword"]` from the first screen. The robot email/password must remain in GitHub Actions secrets and must never be pasted into chat.
+
+Optional selectors: `mfaIndicator`, `mfaCode`, `mfaSubmit`, and `orderIdentity`. Do not use dynamic dialog IDs such as `dialog-51595` or dynamic input IDs such as `d51595...`.
 
 ## Validated UI sequence
 
-1. Open the already existing Omie order and verify its order number/internal ID.
-2. Fill the Transportadora autocomplete directly with `EMPRESA BRASILEIRA DE CORREIOS E TELEGRAFOS`; do not open the separate carrier search dialog.
-3. Open the box icon. Fill `Uber`, select/commit the autocomplete value, click **Salvar**, then click **Fechar** on the package dialog.
-4. Open the truck icon. The quotation presents `CORREIOS MINI ENVIOS CTR AG`; do not click the result row. Click **Confirmar** directly.
-5. Click **Salvar** in the main order dialog.
-6. Read back and verify carrier, package, and service before marking the job complete.
+1. Open the Omie login page, fill the email, click Continue, wait for the visible `input#current-password`, fill the password, and click Entrar (`button#btn-login`). Handle MFA if presented.
+2. Open the already existing Omie order and verify its order number/internal ID.
+3. Fill the Transportadora autocomplete directly with `EMPRESA BRASILEIRA DE CORREIOS E TELEGRAFOS`; do not open the separate carrier search dialog.
+4. Open the box icon. Fill `Uber`, select/commit the autocomplete value, click **Salvar**, then click **Fechar** on the package dialog.
+5. Open the truck icon. The quotation presents `CORREIOS MINI ENVIOS CTR AG`; do not click the result row. Click **Confirmar** directly.
+6. Click **Salvar** in the main order dialog.
+7. Read back and verify carrier, package, and service before marking the job complete.
 
 ## MFA
 
