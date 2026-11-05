@@ -9,6 +9,7 @@ import {
 import { prepareOrderAction } from "./actions";
 import type { OrderActionState } from "./actions";
 import { OmieActionButton } from "@/components/omie-action-button";
+import { ShippingEditor } from "@/app/expedicao/shipping-editor";
 
 type Address = {
   id: string;
@@ -42,7 +43,9 @@ type OrderItem = {
 export type OrderDraft = {
   id: string;
   status: string;
+  omie_order_id: number | null;
   omie_order_number: string | null;
+  shipments: { carrier_id: string | null; package_count: number | null; freight_amount: number | null; estimated_delivery_date: string | null; service_modality: string | null } | { carrier_id: string | null; package_count: number | null; freight_amount: number | null; estimated_delivery_date: string | null; service_modality: string | null }[] | null;
   customer_purchase_order: string | null;
   customer_email: string | null;
   created_at: string;
@@ -170,7 +173,7 @@ export function OrderManagement({
         {visibleDrafts.length ? (
           <div className="orders-table-wrap">
             <table className="orders-table">
-              <thead><tr><th>DESTINATÁRIO</th><th>PRODUTO</th><th>REFERÊNCIA</th><th>ENDEREÇO</th><th>E-MAIL NF-E</th><th>TOTAL</th><th>STATUS</th><th>CRIADO EM</th><th>OMIE</th></tr></thead>
+              <thead><tr><th>DESTINATÁRIO</th><th>PRODUTO</th><th>REFERÊNCIA</th><th>ENDEREÇO</th><th>E-MAIL NF-E</th><th>TOTAL</th><th>STATUS</th><th>CRIADO EM</th><th>OMIE / FRETE</th></tr></thead>
               <tbody>
                 {visibleDrafts.map((draft) => {
                   const item = draft.fulfillment_items?.[0];
@@ -184,7 +187,7 @@ export function OrderManagement({
                       <td><strong>{formatCurrency(Number(item?.line_total ?? Number(item?.quantity ?? 0) * Number(item?.unit_price ?? 0)))}</strong></td>
                       <td><span className={`order-status order-status-${draft.status}`}>{statusLabel(draft.status)}</span></td>
                       <td><span className="orders-date"><Clock3 size={12} />{formatDate(draft.created_at)}</span></td>
-                      <td>{canWrite && draft.status === "ready" && <OmieActionButton fulfillmentId={draft.id} kind="send" size="small" />}{canWrite && (draft.status === "order_pending" || draft.status === "error") && <OmieActionButton fulfillmentId={draft.id} kind="send" size="small" />}{canWrite && ["order_created", "billing_pending", "billed"].includes(draft.status) && <OmieActionButton fulfillmentId={draft.id} kind="sync-order" size="small" />}{!canWrite && "Somente consulta"}</td>
+                      <td>{canWrite && draft.status === "ready" && <OmieActionButton fulfillmentId={draft.id} kind="send" size="small" />}{canWrite && (draft.status === "order_pending" || draft.status === "error") && <OmieActionButton fulfillmentId={draft.id} kind="send" size="small" />}{canWrite && ["order_created", "billing_pending", "billed"].includes(draft.status) && <OmieActionButton fulfillmentId={draft.id} kind="sync-order" size="small" />}{canWrite && draft.omie_order_id && ["order_created", "billing_pending"].includes(draft.status) && <ShippingEditor fulfillmentId={draft.id} current={(() => { const shipment = Array.isArray(draft.shipments) ? draft.shipments[0] : draft.shipments; return { carrierId: shipment?.carrier_id && /^\\d+$/.test(shipment.carrier_id) ? Number(shipment.carrier_id) : null, packageCount: shipment?.package_count, freightAmount: shipment?.freight_amount, deliveryForecast: shipment?.estimated_delivery_date, modality: shipment?.service_modality }; })()} />}{!canWrite && "Somente consulta"}</td>
                     </tr>
                   );
                 })}
