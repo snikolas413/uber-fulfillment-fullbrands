@@ -114,11 +114,10 @@ async function execute(job) {
     if (await packageField.count() !== 1) throw new Error("Expected exactly one package field in its dialog.");
     await packageField.fill(process.env.OMIE_PACKAGE_VALUE);
     await packageField.press("Enter");
-    await page.waitForFunction(({ dialogSelector, fieldSelector, expected }) => {
-      const dialog = document.querySelector(dialogSelector);
-      const field = dialog?.querySelector(fieldSelector);
-      return !!field && field.value.trim().toLocaleUpperCase("pt-BR") === expected.trim().toLocaleUpperCase("pt-BR");
-    }, { dialogSelector: selectors.packageDialog, fieldSelector: selectors.packageField, expected: process.env.OMIE_PACKAGE_VALUE }, { timeout: 15000 });
+    const packageValue = await packageField.inputValue();
+    if (packageValue.trim().toLocaleUpperCase("pt-BR") !== process.env.OMIE_PACKAGE_VALUE.trim().toLocaleUpperCase("pt-BR")) {
+      throw new Error("Package autocomplete did not retain the configured package; stopping before freight confirmation.");
+    }
     const packageSave = packageDialog.locator(selectors.packageSave);
     if (await packageSave.count() !== 1) throw new Error("Expected exactly one package save control.");
     await packageSave.click();
