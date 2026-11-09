@@ -190,6 +190,17 @@
 
 
 /* Omie operation controls */
+.import-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.import-modal{width:min(1450px,96vw);max-width:96vw}
+.import-content{padding:24px;overflow:auto;max-height:75vh}
+.import-content>p{font-size:13px;line-height:1.6;margin:0 0 14px}
+.import-tools input[type=file]{max-width:220px;margin-left:10px}
+.import-table-wrap{overflow:auto;max-height:45vh;margin-top:18px;border:1px solid #e2e5dd;border-radius:8px}
+.import-table{min-width:1900px}
+.import-table input{width:145px;padding:8px;border:1px solid #d9dfd1;border-radius:5px;font:inherit;background:#fff;color:#30392b}
+.import-table input:disabled{background:#f2f4ef}
+.import-table input:focus{outline:2px solid #6b813f;outline-offset:1px}
+.import-result{min-width:260px;white-space:normal;line-height:1.5}
 .omie-action-wrap{display:inline-flex;flex-direction:column;align-items:flex-start;gap:5px;max-width:250px;vertical-align:middle}
 .omie-action-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:34px;padding:0 11px;border:1px solid #dfe5d4;border-radius:7px;background:#f6f8f0;color:#596d2e;font:inherit;font-size:10px;font-weight:700;white-space:nowrap;cursor:pointer}
 .omie-action-button:hover{border-color:#b9c99a;background:#eff4e5}

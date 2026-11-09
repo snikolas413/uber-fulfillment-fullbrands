@@ -7,6 +7,7 @@ import {
   ChevronDown, ChevronUp, X, LoaderCircle, Users, MapPinned, ShieldCheck
 } from "lucide-react";
 import { saveRecipientAction, type RecipientActionState } from "./actions";
+import { RecipientImport } from "./recipient-import";
 
 type Address = {
   id: string;
@@ -130,7 +131,7 @@ export function RecipientManagement({
           <h1>Destinatários</h1>
           <p className="page-lead">Motoristas, contatos e endereços de entrega da operação Uber.</p>
         </div>
-        {canWrite && <button type="button" className="primary-button" onClick={openNew}><Plus size={17} /> Novo destinatário</button>}
+        {canWrite && <div className="import-tools"><RecipientImport existingDocuments={recipients.map(recipient => recipient.document_number ?? "")} /><button type="button" className="primary-button" onClick={openNew}><Plus size={17} /> Novo destinatário</button></div>}
       </section>
 
       <section className="recipient-metrics">
