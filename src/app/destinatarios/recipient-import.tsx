@@ -2,9 +2,9 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Upload, X } from "lucide-react";
-import { IMPORT_COLUMNS, MAX_IMPORT_ROWS, parseDelimited, rowsFromCells, validateImportRow, digitsOnly, type ImportRow } from "@/lib/recipient-import";
-import { importRecipientsAction, type ImportResult } from "./import-actions";
+import { Download, Upload, X } from "lucide-react";
+import { IMPORT_COLUMNS, MAX_IMPORT_ROWS, parseDelimited, rowsFromCells, validateImportRow, digitsOnly, buildImportReport, importReportCsv, type ImportRow, type ImportResult } from "@/lib/recipient-import";
+import { importRecipientsAction } from "./import-actions";
 
 const fields: [keyof Omit<ImportRow, "line">, string][] = [
   ["cpf", "CPF"], ["full_name", "Nome"], ["phone_number", "Telefone"], ["email", "E-mail"],
@@ -32,6 +32,7 @@ export function RecipientImport({ existingDocuments }: { existingDocuments: stri
   });
   const done = new Map(results.map(result => [result.line, result]));
   const eligible = rows.filter((row, index) => !validation[index].length && !["created", "skipped"].includes(done.get(row.line)?.status ?? ""));
+  const report = buildImportReport(rows, validation, results);
 
   async function load(file?: File) {
     if (!file || running.current) return;
@@ -56,19 +57,36 @@ export function RecipientImport({ existingDocuments }: { existingDocuments: stri
   async function save() {
     if (running.current || !eligible.length) return;
     running.current = true; setBusy(true); setMessage("");
+    let offset = 0;
     try {
-      for (let offset = 0; offset < eligible.length; offset += 20) {
+      for (; offset < eligible.length; offset += 20) {
         const batch = await importRecipientsAction(eligible.slice(offset, offset + 20));
         setResults(previous => [...previous.filter(item => !batch.some(result => result.line === item.line)), ...batch]);
       }
       setMessage("Importação concluída. Confira os resultados por linha.");
-    } catch (error) { setMessage((error instanceof Error ? error.message : "Importação interrompida.") + " As etapas concluídas foram preservadas; confira os resultados antes de continuar."); }
+    } catch (error) {
+      const pending: ImportResult[] = eligible.slice(offset).map((row, index) => ({
+        line: row.line,
+        status: index < 20 ? "unconfirmed" : "not_processed",
+        message: index < 20 ? "A etapa foi interrompida sem confirmação. Confira o cadastro antes de reenviar esta linha." : "Linha não enviada porque uma etapa anterior foi interrompida.",
+      }));
+      setResults(previous => [...previous.filter(item => !pending.some(result => result.line === item.line)), ...pending]);
+      setMessage((error instanceof Error ? error.message : "Importação interrompida.") + " As etapas concluídas foram preservadas; baixe o relatório para conferir as pendências.");
+    }
     finally { running.current = false; setBusy(false); router.refresh(); }
   }
 
   function downloadTemplate() {
     const url = URL.createObjectURL(new Blob(["\uFEFF" + IMPORT_COLUMNS.join(";") + "\r\n"], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a"); link.href = url; link.download = "modelo-destinatarios.csv"; link.click(); URL.revokeObjectURL(url);
+  }
+
+  function downloadReport() {
+    const url = URL.createObjectURL(new Blob([importReportCsv(report)], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `relatorio-nao-importados-${fileName.replace(/\.[^.]+$/, "").replace(/[^\p{L}\p{N}_-]/gu, "-") || "destinatarios"}.csv`;
+    link.click(); URL.revokeObjectURL(url);
   }
 
   return <>
@@ -83,6 +101,7 @@ export function RecipientImport({ existingDocuments }: { existingDocuments: stri
           {fileName && <p>{fileName} · {rows.length} linha(s) · {eligible.length} apta(s) para importar</p>}
           <p>CPFs existentes serão ignorados. Nenhum cadastro existente será atualizado. A validação de CPF confere o tamanho, sem verificar dígitos verificadores.</p>
           {message && <div className="recipient-alert" role="status">{message}</div>}
+          {!!report.length && <div className="recipient-alert import-report" role="status"><div><strong>{report.length} linha(s) com pendências</strong><p>O relatório inclui a linha do arquivo, os dados da prévia e o motivo do bloqueio ou da falha. Cadastros concluídos não entram no relatório.</p></div><button type="button" className="secondary-button" disabled={busy} onClick={downloadReport}><Download size={16} /> Baixar relatório de pendências (CSV)</button></div>}
           {!!rows.length && <div className="import-table-wrap"><table className="recipient-table import-table"><thead><tr><th>LINHA</th>{fields.map(([key, label]) => <th key={key}>{label}</th>)}<th>VALIDAÇÃO / RESULTADO</th></tr></thead><tbody>
             {rows.map((row, index) => <tr key={row.line}><td>{row.line}</td>{fields.map(([key, label]) => <td key={key}><input aria-label={`${label}, linha ${row.line}`} value={row[key]} disabled={busy || ["created", "skipped"].includes(done.get(row.line)?.status ?? "")} onChange={event => {
               let value = event.target.value;
@@ -92,7 +111,7 @@ export function RecipientImport({ existingDocuments }: { existingDocuments: stri
               setResults(previous => previous.filter(item => item.line !== row.line));
             }} /></td>)}<td className="import-result">{done.get(row.line)?.message ?? (validation[index].join("; ") || "Pronto para importar")}</td></tr>)}
           </tbody></table></div>}
-          {!!results.length && <p role="status">{results.filter(result => result.status === "created").length} cadastrado(s), {results.filter(result => result.status === "skipped").length} ignorado(s), {results.filter(result => result.status === "error").length} com erro.</p>}
+          {!!results.length && <p role="status">{results.filter(result => result.status === "created").length} cadastrado(s), {report.length} linha(s) com pendências. Baixe o relatório para conferir os motivos.</p>}
           <div className="recipient-form-actions"><button type="button" className="recipient-cancel" disabled={busy} onClick={() => setOpen(false)}>Fechar</button><button type="button" className="primary-button" disabled={busy || !eligible.length} onClick={() => void save()}>{busy ? "Processando…" : `Confirmar importação de ${eligible.length} destinatário(s)`}</button></div>
         </div>
       </section>

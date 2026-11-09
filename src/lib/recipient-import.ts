@@ -15,6 +15,45 @@ export type ImportRow = {
 
 export const IMPORT_COLUMNS = ["cpf", "full_name", "phone_number", "email", "endereco", "bairro", "cidade", "estado", "codigo_postal"] as const;
 export const MAX_IMPORT_ROWS = 500;
+export type ImportResult = {
+  line: number;
+  status: "created" | "skipped" | "error" | "unconfirmed" | "not_processed";
+  message: string;
+};
+
+export type ImportReportEntry = { row: ImportRow; status: string; reason: string };
+
+export function buildImportReport(rows: ImportRow[], validation: string[][], results: ImportResult[]): ImportReportEntry[] {
+  const done = new Map(results.map(result => [result.line, result]));
+  return rows.flatMap((row, index) => {
+    const result = done.get(row.line);
+    if (result?.status === "created") return [];
+    if (result) {
+      const labels = { skipped: "Ignorado", error: "Erro no cadastro", unconfirmed: "Resultado não confirmado", not_processed: "Não processado" };
+      return [{ row, status: labels[result.status], reason: result.message }];
+    }
+    const errors = validation[index] ?? [];
+    return errors.length ? [{ row, status: "Bloqueado na validação", reason: errors.join("; ") }] : [];
+  });
+}
+
+function csvCell(value: string | number): string {
+  let text = String(value);
+  // CSV quoting does not stop spreadsheet formula execution.
+  if (/^[\s\uFEFF]*[=+@-]/.test(text)) text = "'" + text;
+  return '"' + text.replace(/"/g, '""') + '"';
+}
+
+export function importReportCsv(entries: ImportReportEntry[]): string {
+  const headers = ["linha_arquivo", "situacao", "motivo", ...IMPORT_COLUMNS];
+  const records = entries.map(({ row, status, reason }) => [
+    row.line, status, reason, row.cpf, row.full_name, row.phone_number, row.email,
+    [row.endereco, row.numero, row.complemento].filter(Boolean).join(" "),
+    row.bairro, row.cidade, row.estado, row.codigo_postal,
+  ]);
+  return "\uFEFF" + [headers, ...records].map(record => record.map(csvCell).join(";")).join("\r\n") + "\r\n";
+}
+
 export const digitsOnly = (value: string) => value.replace(/\D/g, "");
 const normalizeHeader = (value: string) => value.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[\s-]+/g, "_");
 const states = new Set("AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO".split(" "));

@@ -25,6 +25,14 @@ O navegador envia etapas de até 20 linhas. O servidor valida sessão, perfil at
 
 O resultado mostra cadastros concluídos, ignorados e erros por linha. As linhas concluídas ficam bloqueadas para evitar reenvio pela mesma prévia. Em interrupções, confira o cadastro antes de continuar; a nova tentativa verifica novamente a existência do CPF. Arquivos são lidos no navegador; o arquivo original não é armazenado no servidor.
 
+## Relatório de pendências
+
+Quando existem linhas bloqueadas, a prévia oferece **Baixar relatório de pendências (CSV)**. O arquivo inclui `linha_arquivo`, `situacao`, `motivo` e as nove colunas do modelo, com os dados atuais da prévia e o endereço reunido em `endereco`.
+
+O relatório é atualizado após a importação e inclui validações locais, CPFs duplicados, erros no cadastro e linhas não processadas. Em interrupção de uma etapa, diferencia resultado não confirmado (a linha pode ter sido gravada antes da perda da resposta) de linha não enviada. Cadastros confirmados são excluídos do relatório. Linhas válidas que ainda não foram submetidas não são tratadas como erro.
+
+O download é feito no navegador e não armazena o arquivo no servidor. Abra o CSV importando CPF, telefone e CEP como texto para preservar zeros à esquerda. Antes de reenviar dados corrigidos, remova as colunas de diagnóstico se preferir usar somente a estrutura original; o importador também aceita colunas extras.
+
 ## Validação
 
 `npm test` cobre parsing de CSV/TSV/XLSX, aspas, cabeçalhos, limites, zeros à esquerda, separação de endereços e validação dos campos. `npm run typecheck`, `npm run lint` e `npm run build` verificam a integração com o aplicativo.

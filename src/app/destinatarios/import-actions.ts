@@ -2,9 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { type ImportRow, validateImportRow } from "@/lib/recipient-import";
-
-export type ImportResult = { line: number; status: "created" | "skipped" | "error"; message: string };
+import { type ImportRow, type ImportResult, validateImportRow } from "@/lib/recipient-import";
 
 export async function importRecipientsAction(rows: ImportRow[]): Promise<ImportResult[]> {
   if (!Array.isArray(rows) || !rows.length || rows.length > 20) throw new Error("Envie de 1 a 20 linhas por etapa.");

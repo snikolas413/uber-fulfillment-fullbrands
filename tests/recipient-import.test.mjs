@@ -7,7 +7,7 @@ import { zipSync, strToU8 } from 'fflate';
 
 const source = readFileSync(new URL('../src/lib/recipient-import.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
-const { IMPORT_COLUMNS, parseDelimited, rowsFromCells, validateImportRow } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
+const { IMPORT_COLUMNS, parseDelimited, rowsFromCells, validateImportRow, buildImportReport, importReportCsv } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
 const values = ['01234567890', 'Teste Full', '551198765280', 'testefull@gmail.com', 'Rua Afonso 13 casa 2', 'Pinheiros', 'São Paulo', 'SP', '05426200'];
 
 test('estrutura do exemplo separa rua, número e complemento e preserva zeros', () => {
@@ -121,4 +121,39 @@ test('servidor revalida campos e continua após erro de uma linha', async () => 
   const results = await action([row, { ...row, line: 3, cpf: '12345678901' }, { ...row, line: 4, estado: 'ZZ' }]);
   assert.deepEqual(results.map(result => result.status), ['error', 'created', 'error']);
   assert.equal(saved.length, 1);
+});
+
+test('relatório inclui CPF curto e exclui o registro cadastrado, mesmo após atualizar a listagem', () => {
+  const [row] = rowsFromCells([IMPORT_COLUMNS, values]);
+  const rows = [{ ...row, cpf: '1234567890' }, { ...row, line: 3 }];
+  const validation = [validateImportRow(rows[0]), ['CPF já cadastrado']];
+  const report = buildImportReport(rows, validation, [{ line: 3, status: 'created', message: 'Cadastrado' }]);
+  assert.equal(report.length, 1); assert.equal(report[0].row.line, 2);
+  assert.match(report[0].reason, /11 dígitos/);
+  const csv = parseDelimited(importReportCsv(report));
+  assert.deepEqual(csv[0], ['linha_arquivo', 'situacao', 'motivo', ...IMPORT_COLUMNS]);
+  assert.equal(csv[1][0], '2'); assert.equal(csv[1][3], '1234567890');
+  assert.equal(csv[1][7], 'Rua Afonso 13 casa 2');
+  assert.equal(csv[1][11], '05426200');
+});
+
+test('relatório cobre duplicidades, falhas, resultados desconhecidos e linhas não enviadas', () => {
+  const [row] = rowsFromCells([IMPORT_COLUMNS, values]);
+  const rows = Array.from({ length: 6 }, (_, index) => ({ ...row, line: index + 2 }));
+  const results = ['skipped', 'error', 'unconfirmed', 'not_processed'].map((status, index) => ({ line: index + 2, status, message: 'Motivo ' + index }));
+  const report = buildImportReport(rows, [[], [], [], [], ['CPF repetido no arquivo'], []], results);
+  assert.equal(report.length, 5);
+  assert.deepEqual(report.map(entry => entry.status), ['Ignorado', 'Erro no cadastro', 'Resultado não confirmado', 'Não processado', 'Bloqueado na validação']);
+  assert.equal(report[4].reason, 'CPF repetido no arquivo');
+  assert.equal(buildImportReport(rows, rows.map(() => []), []).length, 0);
+});
+
+test('CSV do relatório preserva aspas, separadores e quebras e neutraliza fórmulas', () => {
+  const [row] = rowsFromCells([IMPORT_COLUMNS, values]);
+  const csv = importReportCsv([{ row: { ...row, full_name: '=HYPERLINK("url")', bairro: 'Bairro; "A"\nCentro' }, status: 'Erro', reason: 'Motivo; com "aspas"' }]);
+  assert.ok(csv.startsWith('\uFEFF'));
+  const parsed = parseDelimited(csv);
+  assert.equal(parsed[1][4], '\'=HYPERLINK("url")');
+  assert.equal(parsed[1][8], 'Bairro; "A"\nCentro');
+  assert.equal(parsed[1][2], 'Motivo; com "aspas"');
 });
