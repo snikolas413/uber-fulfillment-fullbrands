@@ -67,7 +67,7 @@ export function RecipientImport({ existingDocuments }: { existingDocuments: stri
   }
 
   function downloadTemplate() {
-    const url = URL.createObjectURL(new Blob(["\uFEFF" + IMPORT_COLUMNS.join(";") + ";numero;complemento\r\n"], { type: "text/csv;charset=utf-8" }));
+    const url = URL.createObjectURL(new Blob(["\uFEFF" + IMPORT_COLUMNS.join(";") + "\r\n"], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a"); link.href = url; link.download = "modelo-destinatarios.csv"; link.click(); URL.revokeObjectURL(url);
   }
 
@@ -78,7 +78,7 @@ export function RecipientImport({ existingDocuments }: { existingDocuments: stri
         <div className="recipient-modal-header"><div><span className="section-kicker">CADASTRO EM MASSA</span><h2 id="import-title">Importar destinatários</h2><p>Selecione o arquivo, revise as linhas e confirme o cadastro.</p></div><button type="button" className="icon-action" disabled={busy} onClick={() => setOpen(false)} aria-label="Fechar importação"><X size={18} /></button></div>
         <div className="import-content">
           <p>Excel (.xlsx, primeira aba), CSV ou TSV. Até {MAX_IMPORT_ROWS} linhas e 5 MB. Use as colunas do modelo e formate CPF, telefone e CEP como texto no Excel.</p>
-          <p>Revise a separação do endereço em logradouro, número e complemento. Você também pode fornecer as colunas opcionais <strong>numero</strong> e <strong>complemento</strong>.</p>
+          <p>O modelo usa as nove colunas do seu arquivo: <strong>cpf, full_name, phone_number, email, endereco, bairro, cidade, estado, codigo_postal</strong>. Preencha o endereço completo em <strong>endereco</strong>, por exemplo: Rua Afonso 13 casa 2. Revise a separação do endereço na prévia abaixo.</p>
           <div className="import-tools"><button type="button" className="secondary-button" onClick={downloadTemplate}>Baixar modelo CSV</button><label className="secondary-button">Selecionar arquivo<input aria-label="Arquivo de destinatários" type="file" accept=".xlsx,.csv,.tsv" disabled={busy} onChange={event => { void load(event.target.files?.[0]); event.target.value = ""; }} /></label></div>
           {fileName && <p>{fileName} · {rows.length} linha(s) · {eligible.length} apta(s) para importar</p>}
           <p>CPFs existentes serão ignorados. Nenhum cadastro existente será atualizado. A validação de CPF confere o tamanho, sem verificar dígitos verificadores.</p>

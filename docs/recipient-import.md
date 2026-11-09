@@ -8,6 +8,7 @@ Na tela Destinatários, use **Importar arquivo**, selecione o arquivo, revise a 
 - CSV com vírgula ou ponto e vírgula; TSV com tabulação.
 - Até 500 destinatários por arquivo e 5 MB.
 - Cabeçalho na primeira linha. Colunas: `cpf`, `full_name`, `phone_number`, `email`, `endereco`, `bairro`, `cidade`, `estado`, `codigo_postal`.
+- O modelo para download tem exatamente essas nove colunas, nessa ordem. Informe rua, número e complemento juntos em `endereco`, como `Rua Afonso 13 casa 2`.
 - Acentos e espaços nos cabeçalhos são normalizados: `endereço` e `código postal` são aceitos.
 - Colunas opcionais: `numero`, `complemento`. Quando `numero` está preenchido, `endereco` é usado como logradouro, sem separação automática.
 - Formate CPF, telefone e CEP como **texto** no Excel. Zeros que já foram perdidos no arquivo não são inventados pelo importador.
