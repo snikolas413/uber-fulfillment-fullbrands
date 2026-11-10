@@ -72,6 +72,8 @@ Depois da solicitação, `StatusPedido` diferencia aceite do faturamento e confi
 
 Referências oficiais: [PedidoVendaFaturamento](https://app.omie.com.br/api/v1/produtos/pedidovendafat/) e [PedidoVendaProduto](https://app.omie.com.br/api/v1/produtos/pedido/).
 
+Diagnóstico real em 10/11/2026, sem alterar pedido ou emitir nota: para o pedido 1142, `SimularImpostos` com o cenário 2954399884, produto R18, cliente Uber, consumo final e `uf_entrega: "SC"` retornou `imposto.icms: {}` e CFOP vazio. A mesma simulação sem `uf_entrega` (cadastro fiscal do cliente) retornou CST 00, origem 1, modalidade 3, alíquota 4%, base 122,01 e valor 4,88. Essa diferença deve ser resolvida pela definição do contexto fiscal da operação ou pelas regras do cenário; não deve ser ocultada com preenchimento arbitrário de tributos. O diagnóstico temporário de inicialização foi removido após coletar os retornos nos logs do Render.
+
 ### 4. Correios e expedição
 A seleção de Mini Envios usa a API de Frete do Omie: `CotarFrete` e, para uma única opção Mini Envios da transportadora Correios, `SelecionarFrete` com `nIdFrete` e `lGratis: true`. **Enviar ao Omie** inclui o pedido e executa essa etapa automaticamente; a mesma sequência conclui o frete quando recupera uma inclusão pendente já localizada no ERP. A etapa do pedido permanece inalterada. Uma falha mantém o pedido criado, com aviso persistido e ação **Tentar frete novamente**, visível somente em caso de pendência de frete, sem repetir a inclusão. Consultas de leitura com bloqueio `REDUNDANT` e prazo válido aguardam o intervalo informado antes de uma única nova consulta; operações de escrita não são repetidas por esse tratamento.
 
