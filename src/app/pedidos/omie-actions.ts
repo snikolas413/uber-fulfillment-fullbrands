@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { callOmie, OmieApiError, OmieConfigurationError } from "@/lib/omie/client";
-import { resolveMiniEnvios, deliveryFreight, DeliveryTypeError, type DeliveryType, type DeliveryTypePage } from "@/lib/omie/delivery-type";
 
 export type OmieActionResult = { status: "success" | "error" | "warning"; message: string };
 type Recipient = { full_name: string; document_number: string | null; email: string | null; phone: string | null };
@@ -48,7 +47,7 @@ function parseOmieDate(value: string | null | undefined): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 function errorMessage(error: unknown) {
-  if (error instanceof OmieConfigurationError || error instanceof OmieApiError || error instanceof DeliveryTypeError) return error.message;
+  if (error instanceof OmieConfigurationError || error instanceof OmieApiError) return error.message;
   return "Falha de comunicação com o Omie. Consulte o status antes de tentar novamente.";
 }
 function isNotFound(error: unknown) {
@@ -145,21 +144,7 @@ function validateOrder(row: Fulfillment) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("O e-mail para NF-e é inválido.");
   return { recipient, address, item, email };
 }
-async function miniEnviosDelivery() {
-  return resolveMiniEnvios(params => callOmie<DeliveryTypePage>("/geral/tiposentrega/", "ListarTipoEntrega", params));
-}
-
-export async function previewMiniEnviosDeliveryAction(): Promise<OmieActionResult> {
-  try {
-    await context();
-    const type = await miniEnviosDelivery();
-    return { status: "success", message: `Tipo de entrega confirmado: ${type.cDescricao}. Código Omie: ${type.nCodEntrega}.${type.nCodTransp ? ` Transportadora vinculada: ${type.nCodTransp}.` : ""} Nenhum pedido foi criado.` };
-  } catch (error) {
-    return { status: "error", message: errorMessage(error) };
-  }
-}
-
-async function includeOrder(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, userId: string, row: Fulfillment, delivery: DeliveryType): Promise<OmieActionResult> {
+async function includeOrder(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, userId: string, row: Fulfillment): Promise<OmieActionResult> {
   const { recipient, address, item, email } = validateOrder(row);
   const po = row.customer_purchase_order?.trim() ?? "";
   const city = address.city.trim().toLocaleUpperCase("pt-BR") + " (" + address.state.trim().toUpperCase() + ")";
@@ -170,7 +155,6 @@ async function includeOrder(supabase: Awaited<ReturnType<typeof createSupabaseSe
       data_previsao: todayInSaoPaulo(), etapa: "10", codigo_parcela: "000",
       ...(row.omie_tax_scenario_id ? { codigo_cenario_impostos: row.omie_tax_scenario_id } : {}),
     },
-    frete: deliveryFreight(delivery),
     informacoes_adicionais: {
       codigo_categoria: "1.01.03", codigo_conta_corrente: 2611948369,
       numero_pedido_cliente: po || "", dados_adicionais_nf: po ? "Purchase Order #" + po + "|" : "",
@@ -209,9 +193,6 @@ async function includeOrder(supabase: Awaited<ReturnType<typeof createSupabaseSe
   await audit(supabase, userId, row.id, "omie.order.created", {
     omie_order_id: orderId, omie_order_number: orderNumber, integration_code: integrationCode(row.id),
     email_present: Boolean(email), shipping_in_omie: true,
-    delivery_type_id: delivery.nCodEntrega, delivery_type_name: delivery.cDescricao,
-    delivery_type_integration_code: delivery.cCodIntEntrega ?? null,
-    carrier_id: delivery.nCodTransp || null,
   });
   revalidatePath("/pedidos"); revalidatePath("/faturamento"); revalidatePath("/");
   return { status: "success", message: "Pedido enviado ao Omie" + (orderNumber ? " com número " + orderNumber : "") + "." };
@@ -242,8 +223,6 @@ export async function sendOrderToOmieAction(id: string, confirmRetry = false): P
       return { status: "error", message: "O status local não permite enviar este pedido ao Omie." };
     }
 
-    // Validate the catalog before reserving the order or attempting inclusion.
-    const delivery = await miniEnviosDelivery();
     if (row.status === "ready") {
       const { data: lock, error } = await supabase.from("fulfillments").update({
         status: "order_pending", omie_last_error: null,
@@ -259,7 +238,7 @@ export async function sendOrderToOmieAction(id: string, confirmRetry = false): P
     }
 
     try {
-      return await includeOrder(supabase, userId, row, delivery);
+      return await includeOrder(supabase, userId, row);
     } catch (error) {
       const message = errorMessage(error);
       await supabase.from("fulfillments").update({
