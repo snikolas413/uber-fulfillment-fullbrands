@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { withRedundantReadRetry } from "@/lib/omie/read-retry";
 
 const OMIE_API_BASE_URL = (process.env.OMIE_API_BASE_URL ?? "https://app.omie.com.br/api/v1").replace(/\/+$/, "");
 const TOKEN_LIFETIME_MS = 23 * 60 * 60 * 1000;
@@ -297,7 +298,7 @@ function assertOmieSuccess(
  * Cliente server-side da API Omie. Nunca importar em componentes client.
  * Aceita App Key/Secret (modelo tradicional) ou token Bearer com renovação no Vault.
  */
-export async function callOmie<T extends Record<string, unknown>>(
+async function callOmieOnce<T extends Record<string, unknown>>(
   endpoint: string,
   method: string,
   params: Record<string, unknown> = {},
@@ -321,6 +322,14 @@ export async function callOmie<T extends Record<string, unknown>>(
   }
 
   return assertOmieSuccess(result) as T;
+}
+
+export async function callOmie<T extends Record<string, unknown>>(
+  endpoint: string,
+  method: string,
+  params: Record<string, unknown> = {},
+): Promise<T> {
+  return withRedundantReadRetry(method, () => callOmieOnce<T>(endpoint, method, params));
 }
 
 export function getOmieCredentialStatus() {

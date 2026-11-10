@@ -39,7 +39,7 @@ function omieStub(options = {}) {
     if (method === 'ConsultarCliente') return { codigo_cliente_omie: 123, razao_social: options.otherCarrier ? 'Transportadora diferente' : 'EMPRESA BRASILEIRA DE CORREIOS E TELEGRAFOS' };
     if (method === 'ListarClientes') return { pagina: 1, total_de_paginas: 1, clientes_cadastro: options.carriers ?? [{ codigo_cliente_omie: 123, razao_social: 'EMPRESA BRASILEIRA DE CORREIOS E TELEGRAFOS', inativo: 'N' }] };
     if (method === 'AlterarPedidoVenda') { carrierAssigned = true; return {}; }
-    if (method === 'StatusPedido') return { codigo_pedido: 555, numero_pedido: '1128', etapa: '10' };
+    if (method === 'StatusPedido') return { codigo_pedido: 555, numero_pedido: '1128', etapa: '10', ...(options.orderStatus ?? {}) };
     if (method === 'CotarFrete') {
       quotes++;
       if (options.upstreamError && (quotes === 1 || options.alwaysQuoteError)) {
@@ -132,7 +132,7 @@ function actionsStub(options = {}) {
       let patch;
       const query = {
         select() { return query; }, eq() { return query; },
-        update(value) { patch = value; writes.push(value); return query; },
+        update(value) { patch = value; writes.push(value); if (table === 'fulfillments') Object.assign(row, value); return query; },
         async maybeSingle() { return { data: table === 'user_profiles' ? { role: options.role ?? 'operador', is_active: true } : patch ? { id } : row, error: null }; },
         async insert(value) { audits.push(value); return { error: null }; },
         async upsert(value) { shipments.push(value); return { error: options.localFailure ? { message: 'Falha local' } : null }; },
@@ -161,6 +161,23 @@ test('criação mantém PO e cenário e depois seleciona a opção de frete cota
   assert.deepEqual(payload.frete, { codigo_transportadora: 123 }); assert.ok(!('numero_pedido_compra' in payload.det[0].inf_adic));
   assert.equal(audits[1].action, 'omie.freight.selected'); assert.equal(audits[1].after_summary.freight_quote_id, 987);
   assert.equal(shipments[0].freight_amount, 0);
+  assert.equal(calls.filter(call => call.method === 'IncluirPedido').length, 1);
+  assert.equal(calls.filter(call => call.method === 'SelecionarFrete').length, 1);
+  assert.ok(calls.findIndex(call => call.method === 'IncluirPedido') < calls.findIndex(call => call.method === 'SelecionarFrete'));
+  assert.equal(payload.cabecalho.etapa, '10');
+  assert.ok(!calls.some(call => ['TrocarEtapaPedido', 'FaturarPedidoVenda', 'GerarFrete', 'GerarEtiqueta'].includes(call.method)));
+});
+
+test('envio pendente recupera pedido já incluído e termina o frete sem recriar ou mudar etapa', async () => {
+  const pending = actionsStub({ status: 'order_pending' });
+  assert.equal((await pending.actions.sendOrderToOmieAction(id)).status, 'success');
+  assert.ok(!pending.calls.some(call => ['IncluirPedido', 'TrocarEtapaPedido', 'FaturarPedidoVenda'].includes(call.method)));
+  assert.equal(pending.calls.filter(call => call.method === 'SelecionarFrete').length, 1);
+  for (const orderStatus of [{ cancelada: 'S' }, { faturada: 'S' }, { etapa: '70' }]) {
+    const closed = actionsStub({ status: 'order_pending', orderStatus });
+    await closed.actions.sendOrderToOmieAction(id);
+    assert.ok(!closed.calls.some(call => ['IncluirPedido', 'SelecionarFrete'].includes(call.method)));
+  }
 });
 
 test('falha de frete mantém pedido criado e não retorna para pendente de inclusão', async () => {

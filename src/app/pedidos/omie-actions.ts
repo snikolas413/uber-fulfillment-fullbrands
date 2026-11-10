@@ -265,7 +265,14 @@ export async function sendOrderToOmieAction(id: string, confirmRetry = false): P
     if (row.status === "order_pending" || row.status === "error") {
       try {
         const existing = await statusFromOmie(row);
-        if (hasOmieOrder(existing)) return await reconcile(supabase, userId, row, existing);
+        if (hasOmieOrder(existing)) {
+          const reconciled = await reconcile(supabase, userId, row, existing);
+          if (existing.cancelada === "S" || existing.faturada === "S" || existing.ListaNfe?.some((nfe) => nfe.numero_nfe || nfe.chave_nfe) ||
+            !["10", "20", "30", "40", "50"].includes(String(existing.etapa))) return reconciled;
+          const recovered = await load(supabase, id);
+          // Finish freight for a recovered inclusion, without including the order again.
+          return await applyMiniEnviosFreight(supabase, userId, recovered);
+        }
       } catch (error) {
         if (!isNotFound(error)) {
           return { status: "error", message: "Não foi possível confirmar se o pedido já existe no Omie. Não será feita nova inclusão para evitar duplicidade. " + errorMessage(error) };

@@ -19,7 +19,7 @@ const labels: Record<ActionKind, string> = {
   "sync-order": "Atualizar Omie",
   invoice: "Validar e faturar",
   "sync-shipping": "Sincronizar frete",
-  "select-mini": "Selecionar Mini Envios",
+  "select-mini": "Tentar frete novamente",
 };
 
 const icons = {
@@ -47,7 +47,7 @@ export function OmieActionButton({
   function run() {
     if (kind === "send") {
       const accepted = window.confirm(
-        "Esta ação criará um pedido real no Omie para Uber e tentará selecionar Mini Envios com frete grátis para o cliente. O motorista será o destino físico e nenhum e-mail automático será disparado. Continuar?"
+        "Esta ação criará o pedido no Omie e selecionará Mini Envios com frete grátis para o cliente automaticamente. O motorista será o destino físico. A etapa do pedido será mantida, sem faturamento ou e-mail automático. Continuar?"
       );
       if (!accepted) return;
     }
@@ -99,7 +99,7 @@ export function OmieActionButton({
         disabled={pending}
       >
         {pending ? <LoaderCircle className="auth-spinner" size={13} /> : <Icon size={13} />}
-        {pending ? "Processando..." : labels[kind]}
+        {pending ? (kind === "send" ? "Criando pedido e preparando frete..." : "Processando...") : labels[kind]}
       </button>
       {result && (
         <small className={`omie-action-result omie-action-result-${result.status}`} role="status">
