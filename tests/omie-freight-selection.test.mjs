@@ -183,6 +183,28 @@ test('sincronizar pedido preserva o erro de frete e auditoria guarda o motivo de
   assert.equal(synced.writes[0].omie_last_error, message);
   const pending = actionsStub({ status: 'order_created', quotes: [] });
   await pending.actions.selectMiniEnviosFreightAction(id);
-  assert.match(pending.audits[0].after_summary.message, /Mini Envios não está disponível/);
+  assert.match(pending.audits[0].after_summary.message, /cotação sem opções/);
+  assert.deepEqual(pending.audits[0].after_summary.quote_diagnostic.options, []);
   assert.match(pending.writes[0].omie_last_error, /^Frete: /);
+});
+
+test('reconhece descrições de contrato Mini Envios sem aceitar outros serviços', async () => {
+  for (const name of ['CORREIOS MINI ENVIOS CTR AG', 'MINI ENVIOS CONTRATO TA', 'Mini Envios (Contrato)', 'Correios - Mini Envios - Contrato Agência']) {
+    const { request, calls } = omieStub({ quotes: [{ ...mini, cDescricaoServico: name }] });
+    await freight.selectMiniEnviosFreight(request, 555, integrationCode);
+    assert.equal(calls.find(call => call.method === 'SelecionarFrete').params.nIdFrete, 987);
+  }
+  for (const name of ['SEDEX', 'PAC', 'Mini Envios Express', 'Não usar Mini Envios']) assert.equal(freight.isMiniEnviosName(name), false);
+  const fallback = omieStub({ quotes: [{ ...mini, cDescricaoServico: '', cTipoServico: 'CORREIOS MINI ENVIOS CTR AG' }] });
+  await freight.selectMiniEnviosFreight(fallback.request, 555, integrationCode);
+});
+
+test('relata opções não reconhecidas com diagnóstico restrito aos campos de serviço', async () => {
+  const { request, calls } = omieStub({ quotes: [{ ...mini, cDescricaoServico: 'SEDEX', unexpectedSecret: 'Não copiar este campo' }] });
+  await assert.rejects(freight.selectMiniEnviosFreight(request, 555, integrationCode), error => {
+    assert.match(error.message, /Opções: SEDEX/);
+    assert.deepEqual(error.diagnostic.options, [{ id: 987, type: '03298', description: 'SEDEX', carrier: 'CORREIOS' }]);
+    return true;
+  });
+  assert.ok(!calls.some(call => call.method === 'SelecionarFrete'));
 });

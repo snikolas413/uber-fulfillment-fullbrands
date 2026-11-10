@@ -15,12 +15,35 @@ type Order = {
 
 type Request = <T extends Record<string, unknown>>(endpoint: string, method: string, params: Record<string, unknown>) => Promise<T>;
 export class FreightSelectionError extends Error {
-  constructor(message: string, public readonly outcome: "not_selected" | "unknown" | "selected" = "not_selected") { super(message); }
+  constructor(message: string, public readonly outcome: "not_selected" | "unknown" | "selected" = "not_selected",
+    public readonly diagnostic?: { stage: string; options: { id: number | null; type: string; description: string; carrier: string }[] }) { super(message); }
 }
 
 const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const miniNames = new Set(["minienvios", "correiosminienvios", "minienvioscorreios"]);
 const correiosNames = new Set(["correios", "empresabrasileiradecorreiosetelegrafos"]);
+
+export function isMiniEnviosName(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  if (miniNames.has(normalize(value))) return true;
+  const words = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return /^(?:correios )?mini envios(?: correios)?(?: (?:contrato|ctr)(?: (?:ag|ta|agencia|agencias))?)?$/.test(words);
+}
+
+function isMiniQuote(quote: FreightQuote) {
+  const description = typeof quote.cDescricaoServico === "string" ? quote.cDescricaoServico.trim() : "";
+  const serviceMatches = isMiniEnviosName(description) || (!description && isMiniEnviosName(quote.cTipoServico));
+  const carrier = typeof quote.cNomeTransportadora === "string" ? normalize(quote.cNomeTransportadora) : "";
+  return serviceMatches && (!carrier || correiosNames.has(carrier) || carrier === "ect" || carrier.startsWith("correioscontrato"));
+}
+
+function quoteDiagnostic(quotes: FreightQuote[]) {
+  const text = (value: unknown) => typeof value === "string" ? value.slice(0, 100) : "";
+  return { stage: "match_quote", options: quotes.slice(0, 20).map(quote => ({
+    id: Number.isSafeInteger(quote.nIdFrete) ? quote.nIdFrete : null,
+    type: text(quote.cTipoServico), description: text(quote.cDescricaoServico), carrier: text(quote.cNomeTransportadora),
+  })) };
+}
 
 type Carrier = { codigo_cliente_omie: number; razao_social?: string; nome_fantasia?: string; inativo?: string };
 
@@ -89,10 +112,14 @@ export async function selectMiniEnviosFreight(request: Request, orderId: number,
   const response = await request<{ listaCotacao?: FreightQuote[]; cCodStatus?: string; cDesStatus?: string }>("/produtos/frete/", "CotarFrete", { nIdPedido: orderId });
   checkResponse(response);
   if (!Array.isArray(response.listaCotacao)) throw new FreightSelectionError("O Omie não retornou opções válidas para a cotação de frete.");
-  const matches = response.listaCotacao.filter(quote => typeof quote.cDescricaoServico === "string" && miniNames.has(normalize(quote.cDescricaoServico)) &&
-    (!quote.cNomeTransportadora || correiosNames.has(normalize(quote.cNomeTransportadora))));
-  if (!matches.length) throw new FreightSelectionError("Mini Envios não está disponível na cotação deste pedido. Confira os dados de entrega, peso e volumes no Omie.");
-  if (matches.length !== 1) throw new FreightSelectionError("A cotação retornou mais de uma opção Mini Envios. Confira a opção correta no Omie antes de continuar.");
+  if (!response.listaCotacao.length) throw new FreightSelectionError("O Omie retornou uma cotação sem opções de entrega. Nenhum frete foi selecionado.", "not_selected", quoteDiagnostic([]));
+  const matches = response.listaCotacao.filter(isMiniQuote);
+  const diagnostic = quoteDiagnostic(response.listaCotacao);
+  if (!matches.length) {
+    const names = diagnostic.options.slice(0, 5).map(option => option.description || option.type || "Sem descrição").join("; ");
+    throw new FreightSelectionError("Não foi possível reconhecer Mini Envios nas opções retornadas pelo Omie. Opções: " + names + ". Nenhum frete foi selecionado.", "not_selected", diagnostic);
+  }
+  if (matches.length !== 1) throw new FreightSelectionError("A cotação retornou mais de uma opção Mini Envios. Confira a opção correta no Omie antes de continuar.", "not_selected", diagnostic);
   const quote = matches[0];
   if (!Number.isSafeInteger(quote.nIdFrete) || quote.nIdFrete <= 0 || typeof quote.cTipoServico !== "string" || !quote.cTipoServico.trim() ||
     !Number.isFinite(quote.nValorFrete) || quote.nValorFrete < 0 || !Number.isInteger(quote.nDiasEntrega) || quote.nDiasEntrega < 0) {

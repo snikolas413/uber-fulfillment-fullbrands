@@ -237,6 +237,7 @@ async function applyMiniEnviosFreight(supabase: Awaited<ReturnType<typeof create
       omie_order_id: row.omie_order_id,
       outcome: selected ? "selected" : error instanceof FreightSelectionError ? error.outcome : "not_selected",
       message: errorMessage(error).slice(0, 500),
+      quote_diagnostic: error instanceof FreightSelectionError ? error.diagnostic ?? null : null,
     }).catch(() => console.error("Não foi possível registrar a pendência de seleção de frete na auditoria."));
     const message = errorMessage(error) + " O pedido permanece criado; não reenvie a inclusão do pedido.";
     await persistMessage(message);

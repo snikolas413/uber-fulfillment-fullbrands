@@ -20,6 +20,8 @@ Cotação e seleção de serviço são operações diferentes da atualização d
 
 Depois de criar um pedido, a aplicação tenta essa seleção automaticamente. Pedidos existentes ainda não faturados oferecem **Selecionar Mini Envios** para executar somente a etapa de frete. A operação confere o vínculo do pedido, a transportadora Correios e uma única opção Mini Envios. Consulta o pedido novamente antes de selecionar e depois da resposta, conferindo que o frete ao cliente ficou zero. A confirmação do serviço escolhido vem da resposta de `SelecionarFrete`; `ConsultarPedido` é usado para conferir os dados disponíveis do pedido.
 
+O reconhecimento aceita descrições Mini Envios com os complementos de contrato dos Correios, como `CORREIOS MINI ENVIOS CTR AG` e `MINI ENVIOS CONTRATO TA`. Quando a descrição está vazia, também confere o nome do serviço em `cTipoServico`. Não seleciona PAC, SEDEX, nomes desconhecidos nem uma opção ambígua. Se nenhuma opção for reconhecida, o aviso e a auditoria registram apenas os campos de identificação dos serviços retornados (até 20 opções, com textos limitados), distinguindo esse caso de uma cotação vazia. Não registra credenciais nem o restante da resposta.
+
 A aplicação não chama `GerarFrete`, `GerarEtiqueta` nem operações de postagem neste fluxo. Se a seleção falhar ou ficar incerta, o pedido continua criado e a pendência aparece na listagem. Não há repetição automática após timeout. Antes de tentar novamente, confira o pedido no ERP. `lGratis: true` não significa que o serviço dos Correios deixou de ter custo para a empresa.
 
 ## Observações operacionais
