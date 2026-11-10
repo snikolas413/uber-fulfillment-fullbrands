@@ -1,19 +1,10 @@
 import { redirect } from "next/navigation";
 import { ClipboardCheck, Clock3, FileText, ShieldCheck, Mail, Package } from "lucide-react";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { OmieActionButton } from "@/components/omie-action-button";
+import { BillingManagement, type BillingRow } from "./billing-management";
 
 export const dynamic = "force-dynamic";
 
-type InvoiceRecord = { omie_invoice_number: string | null; access_key: string | null; status: string; issued_at: string | null; danfe_url: string | null; xml_available: boolean };
-type BillingRow = {
-  id: string;
-  status: string;
-  omie_order_number: string | null;
-  created_at: string;
-  recipients: { full_name: string } | null;
-  invoices: InvoiceRecord | InvoiceRecord[] | null;
-};
 type PreparedItem = {
   product_code: string;
   description: string;
@@ -29,17 +20,6 @@ type PreparedRow = {
   recipients: { full_name: string } | null;
   fulfillment_items: PreparedItem[];
 };
-
-function firstRelation<T>(value: T | T[] | null | undefined): T | null {
-  return Array.isArray(value) ? value[0] ?? null : value ?? null;
-}
-
-function statusLabel(status: string) {
-  if (status === "order_created") return "Pedido criado no Omie";
-  if (status === "billing_pending") return "Aguardando faturamento";
-  if (status === "billed") return "Faturado";
-  return status;
-}
 
 function formatDate(value: string | null) {
   if (!value) return "—";
@@ -62,6 +42,7 @@ export default async function BillingPage() {
     .eq("id", authData.user.id)
     .maybeSingle();
   if (profileError || !profile?.is_active) redirect("/acesso-negado");
+  const canBill = ["admin", "gestor", "operador"].includes(profile.role);
 
   const [preparedResult, billingResult] = await Promise.all([
     supabase
@@ -72,7 +53,7 @@ export default async function BillingPage() {
       .limit(100),
     supabase
       .from("fulfillments")
-      .select("id, status, omie_order_number, created_at, recipients(full_name), invoices(omie_invoice_number, access_key, status, issued_at, danfe_url, xml_available)")
+      .select("id, status, omie_order_id, omie_order_number, omie_last_error, created_at, recipients(full_name), invoices(omie_invoice_number, access_key, status, issued_at, danfe_url, xml_available), shipments(carrier_id, service_code, freight_amount)")
       .in("status", ["order_created", "billing_pending", "billed"])
       .order("created_at", { ascending: false })
       .limit(100),
@@ -92,8 +73,8 @@ export default async function BillingPage() {
 
   return (
     <div className="billing-page">
-      <section className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line" /> CONTROLE FISCAL</div><h1>Faturamento</h1><p className="page-lead">Confira as preparações e acompanhe os pedidos encaminhados ao Omie e suas informações de NF-e.</p></div><span className="history-access"><ShieldCheck size={14} /> Consulta</span></section>
-      <section className="orders-notice"><div className="orders-notice-icon"><Clock3 size={17} /></div><div><strong>Integração fiscal em preparação</strong><p>As preparações locais aparecem abaixo para conferência. A criação do pedido no Omie e a emissão de NF-e continuam bloqueadas até a validação dos parâmetros comerciais/fiscais e das credenciais da aplicação.</p></div></section>
+      <section className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line" /> CONTROLE FISCAL</div><h1>Faturamento</h1><p className="page-lead">Selecione os pedidos preparados, confirme o faturamento e acompanhe o resultado de cada emissão no Omie.</p></div><span className="history-access"><ShieldCheck size={14} /> {canBill ? "Faturamento autorizado" : "Somente consulta"}</span></section>
+      <section className="orders-notice"><div className="orders-notice-icon"><FileText size={17} /></div><div><strong>Faturamento dos pedidos selecionados</strong><p>A emissão de NF-e acontece somente após sua confirmação. Pedidos já faturados ou com emissão em andamento não recebem uma nova solicitação. A criação dos pedidos continua separada desta etapa.</p></div></section>
       <section className="orders-stats billing-stats">
         <article className="recipient-stat"><span className="recipient-stat-icon"><ClipboardCheck size={17} /></span><div><strong>{preparedRows.length + rows.length}</strong><small>Registros acompanhados</small></div></article>
         <article className="recipient-stat"><span className="recipient-stat-icon"><Package size={17} /></span><div><strong>{preparedRows.length}</strong><small>Aguardando integração Omie</small></div></article>
@@ -122,25 +103,7 @@ export default async function BillingPage() {
         <div className="recipient-table-footer"><span>{preparedRows.length} preparação(ões) nesta fila</span><span>A sincronização consulta o Omie. O faturamento é uma ação fiscal separada e exige confirmação.</span></div>
       </section>
 
-      <section className="panel orders-panel">
-        <div className="recipient-toolbar"><div><span className="section-kicker">FILA DE FATURAMENTO</span><h2>Pedidos e notas fiscais</h2></div></div>
-        {billingResult.error ? <div className="recipient-alert recipient-alert-error">Não foi possível consultar a fila fiscal.</div> : rows.length ? (
-          <div className="orders-table-wrap"><table className="orders-table">
-            <thead><tr><th>DESTINATÁRIO</th><th>PEDIDO OMIE</th><th>STATUS</th><th>NF-E / DOCUMENTOS</th><th>EMISSÃO</th><th>AÇÕES</th></tr></thead>
-            <tbody>{rows.map((row) => {
-              const invoice = firstRelation(row.invoices);
-              return <tr key={row.id}>
-                <td><strong>{row.recipients?.full_name ?? "Destinatário indisponível"}</strong><small>{formatDate(row.created_at)}</small></td>
-                <td>{row.omie_order_number ? `#${row.omie_order_number}` : "Aguardando número Omie"}</td>
-                <td><span className={`order-status order-status-${row.status}`}>{statusLabel(row.status)}</span></td>
-                <td><strong>{invoice?.omie_invoice_number || "—"}</strong><small>{invoice?.danfe_url ? <a href={invoice.danfe_url} target="_blank" rel="noreferrer">Abrir DANFE</a> : "DANFE não disponível"}</small><small>{invoice?.xml_available ? "XML disponível no Omie" : "XML ainda não recebido"}</small></td>
-                <td>{formatDate(invoice?.issued_at ?? null)}</td>
-                <td><OmieActionButton fulfillmentId={row.id} kind="sync-order" size="small" />{row.status === "billing_pending" && <OmieActionButton fulfillmentId={row.id} kind="invoice" size="small" />}</td>
-              </tr>;
-            })}</tbody>
-          </table></div>
-        ) : <div className="recipient-empty"><span className="recipient-empty-icon"><FileText size={24} /></span><strong>Nenhum pedido aguardando faturamento</strong><p>Quando um pedido for enviado ao Omie e avançar para a fila fiscal, ele aparecerá aqui.</p></div>}
-      </section>
+      {billingResult.error ? <div className="recipient-alert recipient-alert-error">Não foi possível consultar a fila fiscal.</div> : <BillingManagement rows={rows} canBill={canBill} />}
     </div>
   );
 }

@@ -14,6 +14,7 @@ function loadModule(path, modules = {}) {
 }
 
 const freight = loadModule('../src/lib/omie/freight-selection.ts');
+const billing = loadModule('../src/lib/omie/invoice-order.ts');
 const id = '11111111-1111-4111-8111-111111111111';
 const integrationCode = 'UFB-' + id.replaceAll('-', '');
 const mini = { nIdFrete: 987, cTipoServico: '04227', cDescricaoServico: 'Mini Envios', cNomeTransportadora: 'CORREIOS', nDiasEntrega: 5, nValorFrete: 12.5 };
@@ -146,6 +147,7 @@ function actionsStub(options = {}) {
     'next/cache': { revalidatePath() {} },
     '@/lib/supabase/server': { createSupabaseServerClient: async () => client },
     '@/lib/omie/freight-selection': freight,
+    '@/lib/omie/invoice-order': billing,
     '@/lib/omie/client': { callOmie: omie.request, OmieApiError: ApiError, OmieConfigurationError: ApiError },
   });
   return { actions, writes, audits, shipments, calls: omie.calls };

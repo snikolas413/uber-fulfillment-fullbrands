@@ -15,7 +15,7 @@ https://uber-fulfillment-fullbrands.onrender.com
 - Dashboard com indicadores do banco
 - Destinatários: cadastro, edição, busca e histórico de endereços
 - Pedidos: preparação local e envio controlado ao Omie, com PO, endereço físico do motorista e e-mail da NF-e
-- Faturamento: pré-conferência, sincronização de NF-e e faturamento por ação separada com confirmação
+- Faturamento: seleção de até 100 pedidos por lote, confirmação, progresso e resultado individual das emissões, com proteção contra reenvio
 - Expedição: sincronização do frete e rastreio registrados pelo Omie após usar a integração Correios do próprio ERP
 - Histórico: consulta de auditoria para perfis admin e gestor
 

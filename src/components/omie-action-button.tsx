@@ -76,7 +76,7 @@ export function OmieActionButton({
           response = await syncOmieOrderAction(fulfillmentId);
           break;
         case "invoice":
-          response = await invoiceOrderAction(fulfillmentId);
+          response = await invoiceOrderAction(fulfillmentId, true);
           break;
         case "sync-shipping":
           response = await syncOmieShippingAction(fulfillmentId);

@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { callOmie, OmieApiError, OmieConfigurationError } from "@/lib/omie/client";
-import { selectMiniEnviosFreight, resolveCorreiosCarrier, FreightSelectionError } from "@/lib/omie/freight-selection";
+import { selectMiniEnviosFreight, resolveCorreiosCarrier, FreightSelectionError, isMiniEnviosName } from "@/lib/omie/freight-selection";
+import { invoiceExistingOrder, type BillingOutcome, type BillingControlState } from "@/lib/omie/invoice-order";
 
 export type OmieActionResult = { status: "success" | "error" | "warning"; message: string };
 type Recipient = { full_name: string; document_number: string | null; email: string | null; phone: string | null };
@@ -330,51 +331,47 @@ export async function syncOmieOrderAction(id: string): Promise<OmieActionResult>
   }
 }
 
-export async function invoiceOrderAction(id: string): Promise<OmieActionResult> {
+export async function invoiceOrderAction(id: string, confirmed = false): Promise<OmieActionResult & { billingOutcome?: BillingOutcome }> {
   try {
+    if (!confirmed) return { status: "error", message: "Confirme os pedidos selecionados antes de solicitar o faturamento." };
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return { status: "error", message: "Pedido inválido." };
     const { supabase, userId } = await context();
     const row = await load(supabase, id);
-    if (!row.omie_order_id || !row.omie_order_number) {
-      return { status: "error", message: "Sincronize o número do pedido Omie antes de solicitar faturamento." };
+    if (!row.omie_order_id || !row.omie_order_number || !["order_created", "billing_pending", "billed"].includes(row.status)) return { status: "error", message: "O pedido precisa estar criado no Omie para ser faturado." };
+    if (row.omie_last_error?.startsWith("Frete: ")) return { status: "warning", message: "Resolva a pendência de frete deste pedido antes de faturar." };
+    const { data: shipment, error: shipmentError } = await supabase.from("shipments").select("carrier_id,service_code,freight_amount").eq("fulfillment_id", id).maybeSingle();
+    const carrierId = Number(shipment?.carrier_id);
+    if (shipmentError || !shipment || !Number.isSafeInteger(carrierId) || carrierId <= 0 || shipment.freight_amount == null || Number(shipment.freight_amount) !== 0 ||
+      !(shipment.service_code === "04227" || isMiniEnviosName(shipment.service_code))) return { status: "warning", message: "Confirme Mini Envios com frete grátis antes de faturar este pedido." };
+    let claimId: string | null = null;
+    const claim = async () => {
+      const inserted = await supabase.from("invoices").insert({ fulfillment_id: id, status: "billing_processing" }).select("id").maybeSingle();
+      if (!inserted.error && inserted.data) { claimId = inserted.data.id; return true; }
+      if (inserted.error?.code !== "23505") throw new Error("Não foi possível reservar o faturamento deste pedido.");
+      // A unique fulfillment_id prevents concurrent requests; only a pre-emission refusal can be retried.
+      const retried = await supabase.from("invoices").update({ status: "billing_processing" }).eq("fulfillment_id", id)
+        .eq("status", "billing_rejected").is("omie_invoice_number", null).is("access_key", null).select("id").maybeSingle();
+      if (retried.error) throw new Error("Não foi possível conferir a reserva de faturamento.");
+      claimId = retried.data?.id ?? null;
+      return Boolean(claimId);
+    };
+    const settle = async (state: BillingControlState) => {
+      if (!claimId) throw new Error("Reserva de faturamento não confirmada.");
+      const { error } = await supabase.from("invoices").update({ status: state }).eq("id", claimId)
+        .in("status", ["billing_processing", "billing_submitted"]).is("omie_invoice_number", null).is("access_key", null);
+      if (error) throw new Error("Não foi possível salvar o controle de faturamento.");
+    };
+    const result = await invoiceExistingOrder({ request: callOmie, orderId: row.omie_order_id, integrationCode: integrationCode(id), carrierId, claim, settle });
+    let message = result.message;
+    let status: OmieActionResult["status"] = result.outcome === "confirmed" ? "success" : "warning";
+    if (result.snapshot) {
+      try { await reconcile(supabase, userId, row, result.snapshot); }
+      catch { message += " Não foi possível atualizar a cópia local. Consulte o Omie antes de repetir."; status = "warning"; }
     }
-    const current = await statusFromOmie(row);
-    if (current.cancelada === "S") return { status: "error", message: "O pedido está cancelado no Omie." };
-    if (current.faturada === "S" || current.ListaNfe?.some((nfe) => nfe.numero_nfe || nfe.chave_nfe)) {
-      return await reconcile(supabase, userId, row, current);
-    }
-    if (String(current.etapa ?? "") !== "50") {
-      return { status: "warning", message: "O pedido está na etapa " + (current.etapa ?? "desconhecida") + ". Mova-o para a etapa 50 (Faturar) no Omie e sincronize novamente." };
-    }
-    const integrationId = integrationCode(row.id);
-    const validation = await callOmie<Record<string, unknown>>("/produtos/pedidovendafat/", "ValidarPedidoVenda", {
-      codigo_pedido: row.omie_order_id, cCodIntPed: integrationId,
-    });
-    if (validation.faultstring) return { status: "warning", message: String(validation.faultstring) };
-    if (String(validation.cCodStatus ?? "") !== "0") {
-      return {
-        status: "warning",
-        message: String(validation.cDescStatus ?? "O Omie não confirmou a pré-validação do pedido. Nenhum faturamento foi solicitado."),
-      };
-    }
-
-    const result = await callOmie<Record<string, unknown>>("/produtos/pedidovendafat/", "FaturarPedidoVenda", {
-      cCodIntPed: integrationId, nCodPed: row.omie_order_id,
-    });
-    if (result.faultstring) return { status: "warning", message: String(result.faultstring) };
-    if (String(result.cCodStatus ?? "") !== "0") {
-      return {
-        status: "warning",
-        message: String(result.cDescStatus ?? "O Omie não confirmou o faturamento. Consulte o status antes de tentar novamente."),
-      };
-    }
-    const status = await statusFromOmie(row);
-    const reconciled = await reconcile(supabase, userId, row, status);
-    await audit(supabase, userId, row.id, "omie.invoice.requested", {
-      omie_order_number: row.omie_order_number, nfe_number_present: Boolean(status.ListaNfe?.some((nfe) => nfe.numero_nfe)),
-    });
-    return reconciled.status === "success"
-      ? { status: "success", message: "Solicitação de faturamento enviada e status fiscal consultado no Omie." }
-      : reconciled;
+    await audit(supabase, userId, id, "omie.invoice.result", { omie_order_id: row.omie_order_id, outcome: result.outcome, message: message.slice(0, 500) });
+    await supabase.from("fulfillments").update({ omie_last_error: status === "success" ? null : ("Faturamento: " + message).slice(0, 500) }).eq("id", id);
+    revalidatePath("/faturamento"); revalidatePath("/pedidos");
+    return { status, message, billingOutcome: result.outcome };
   } catch (error) {
     return { status: "error", message: errorMessage(error) };
   }
