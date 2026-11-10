@@ -8,16 +8,18 @@ import {
   syncOmieOrderAction,
   invoiceOrderAction,
   syncOmieShippingAction,
+  selectMiniEnviosFreightAction,
   type OmieActionResult,
 } from "@/app/pedidos/omie-actions";
 
-type ActionKind = "send" | "sync-order" | "invoice" | "sync-shipping";
+type ActionKind = "send" | "sync-order" | "invoice" | "sync-shipping" | "select-mini";
 
 const labels: Record<ActionKind, string> = {
   send: "Enviar ao Omie",
   "sync-order": "Atualizar Omie",
   invoice: "Validar e faturar",
   "sync-shipping": "Sincronizar frete",
+  "select-mini": "Selecionar Mini Envios",
 };
 
 const icons = {
@@ -25,6 +27,7 @@ const icons = {
   "sync-order": RefreshCw,
   invoice: FileCheck2,
   "sync-shipping": Truck,
+  "select-mini": Truck,
 };
 
 export function OmieActionButton({
@@ -44,7 +47,7 @@ export function OmieActionButton({
   function run() {
     if (kind === "send") {
       const accepted = window.confirm(
-        "Esta ação criará um pedido de venda real no Omie para Uber, com o motorista como destino físico. O e-mail será preenchido, mas nenhum e-mail automático será disparado. Continuar?"
+        "Esta ação criará um pedido real no Omie para Uber e tentará selecionar Mini Envios com frete grátis para o cliente. O motorista será o destino físico e nenhum e-mail automático será disparado. Continuar?"
       );
       if (!accepted) return;
     }
@@ -78,9 +81,12 @@ export function OmieActionButton({
         case "sync-shipping":
           response = await syncOmieShippingAction(fulfillmentId);
           break;
+        case "select-mini":
+          response = await selectMiniEnviosFreightAction(fulfillmentId);
+          break;
       }
       setResult(response);
-      if (response.status === "success") router.refresh();
+      if (response.status === "success" || response.status === "warning") router.refresh();
     });
   }
 

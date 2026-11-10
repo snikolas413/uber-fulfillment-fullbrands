@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { callOmie, OmieApiError, OmieConfigurationError } from "@/lib/omie/client";
+import { selectMiniEnviosFreight, FreightSelectionError } from "@/lib/omie/freight-selection";
 
 export type OmieActionResult = { status: "success" | "error" | "warning"; message: string };
 type Recipient = { full_name: string; document_number: string | null; email: string | null; phone: string | null };
@@ -47,7 +48,7 @@ function parseOmieDate(value: string | null | undefined): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 function errorMessage(error: unknown) {
-  if (error instanceof OmieConfigurationError || error instanceof OmieApiError) return error.message;
+  if (error instanceof OmieConfigurationError || error instanceof OmieApiError || error instanceof FreightSelectionError) return error.message;
   return "Falha de comunicação com o Omie. Consulte o status antes de tentar novamente.";
 }
 function isNotFound(error: unknown) {
@@ -195,7 +196,58 @@ async function includeOrder(supabase: Awaited<ReturnType<typeof createSupabaseSe
     email_present: Boolean(email), shipping_in_omie: true,
   });
   revalidatePath("/pedidos"); revalidatePath("/faturamento"); revalidatePath("/");
-  return { status: "success", message: "Pedido enviado ao Omie" + (orderNumber ? " com número " + orderNumber : "") + "." };
+  const selected = await applyMiniEnviosFreight(supabase, userId, { ...row, status: "order_created", omie_order_id: orderId, omie_order_number: orderNumber });
+  return { status: selected.status, message: "Pedido criado no Omie" + (orderNumber ? " com número " + orderNumber : "") + ". " + selected.message };
+}
+
+async function applyMiniEnviosFreight(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, userId: string, row: Fulfillment): Promise<OmieActionResult> {
+  let selected = false;
+  const persistMessage = async (message: string | null) => {
+    try {
+      await supabase.from("fulfillments").update({ omie_last_error: message?.slice(0, 500) ?? null }).eq("id", row.id);
+    } catch { console.error("Não foi possível registrar o resultado local da seleção de frete."); }
+    revalidatePath("/pedidos");
+  };
+  try {
+    if (!row.omie_order_id || !["order_created", "billing_pending"].includes(row.status)) {
+      return { status: "warning", message: "O pedido precisa estar criado no Omie e ainda não faturado para selecionar o frete." };
+    }
+    const result = await selectMiniEnviosFreight(callOmie, row.omie_order_id, integrationCode(row.id));
+    selected = true;
+    await audit(supabase, userId, row.id, "omie.freight.selected", {
+      omie_order_id: row.omie_order_id, freight_quote_id: result.quote.nIdFrete,
+      service_code: result.quote.cTipoServico, service_name: result.quote.cDescricaoServico,
+      carrier_id: result.carrierId, free_for_customer: true, quoted_amount: result.quote.nValorFrete,
+      quoted_delivery_days: result.quote.nDiasEntrega,
+    });
+    const { error } = await supabase.from("shipments").upsert({
+      fulfillment_id: row.id, carrier_id: String(result.carrierId), service_code: result.quote.cTipoServico,
+      freight_amount: 0, package_count: result.freight?.quantidade_volumes ?? null,
+      service_modality: result.freight?.modalidade ?? null, omie_last_sync_at: new Date().toISOString(),
+    }, { onConflict: "fulfillment_id" });
+    revalidatePath("/pedidos"); revalidatePath("/expedicao");
+    const message = error ? "Mini Envios foi selecionado no Omie, mas a cópia local do frete não foi atualizada. Confira o ERP antes de repetir." : null;
+    await persistMessage(message);
+    return message ? { status: "warning", message }
+      : { status: "success", message: "Opção Mini Envios selecionada e pedido consultado com frete grátis para o cliente." };
+  } catch (error) {
+    await audit(supabase, userId, row.id, "omie.freight.selection_pending", {
+      omie_order_id: row.omie_order_id,
+      outcome: selected ? "selected" : error instanceof FreightSelectionError ? error.outcome : "not_selected",
+    }).catch(() => console.error("Não foi possível registrar a pendência de seleção de frete na auditoria."));
+    const message = errorMessage(error) + " O pedido permanece criado; não reenvie a inclusão do pedido.";
+    await persistMessage(message);
+    return { status: "warning", message };
+  }
+}
+
+export async function selectMiniEnviosFreightAction(id: string): Promise<OmieActionResult> {
+  try {
+    const { supabase, userId } = await context();
+    return await applyMiniEnviosFreight(supabase, userId, await load(supabase, id));
+  } catch (error) {
+    return { status: "error", message: errorMessage(error) };
+  }
 }
 
 export async function sendOrderToOmieAction(id: string, confirmRetry = false): Promise<OmieActionResult> {

@@ -22,7 +22,7 @@ O envio usa código de integração determinístico por pedido local. Antes de u
 ## Faturamento e expedição
 O faturamento ocorre por ação separada com confirmação explícita. Antes de solicitar NF-e, a aplicação verifica o pedido, etapa `50` (Faturar) e o resultado positivo da validação do Omie. Depois lê o estado fiscal e os dados de NF-e retornados.
 
-A cotação, etiqueta e postagem dos Correios seguem dentro do Omie, cuja integração já está configurada. O app consulta o pedido Omie para importar frete, modalidade, volumes, previsão e código/link de rastreio. Não existe chamada direta aos Correios pelo app.
+Após criar o pedido, a aplicação tenta cotar e selecionar uma única opção Mini Envios pela API de Frete do Omie (`CotarFrete` e `SelecionarFrete` com `nIdFrete` e `lGratis: true`). Exige a transportadora Correios já definida no pedido. Uma falha deixa a pendência visível sem refazer a inclusão. A ação **Selecionar Mini Envios** permite executar somente a etapa de frete em pedidos existentes ainda não faturados. Etiqueta e postagem continuam dentro do Omie. O app também consulta o pedido para importar frete, modalidade, volumes, previsão e rastreio. Não existe chamada direta aos Correios pelo app.
 
 ## Configuração ainda necessária
 - Credenciais próprias do app Omie (app_hash, access token, refresh token e timestamp ISO do primeiro token) no Render.

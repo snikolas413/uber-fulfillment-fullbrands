@@ -25,7 +25,7 @@ export default async function OrdersPage() {
       .order("created_at", { ascending: false, referencedTable: "delivery_addresses" }),
     supabase
       .from("fulfillments")
-      .select("id, status, omie_order_id, omie_order_number, customer_purchase_order, customer_email, created_at, recipients(full_name, email), delivery_addresses(city, state, postal_code), fulfillment_items(product_code, description, quantity, unit_price, line_total), shipments(carrier_id, package_count, freight_amount, estimated_delivery_date, service_modality)")
+      .select("id, status, omie_order_id, omie_order_number, omie_last_error, customer_purchase_order, customer_email, created_at, recipients(full_name, email), delivery_addresses(city, state, postal_code), fulfillment_items(product_code, description, quantity, unit_price, line_total), shipments(carrier_id, package_count, freight_amount, estimated_delivery_date, service_modality)")
       .order("created_at", { ascending: false })
       .limit(100),
   ]);

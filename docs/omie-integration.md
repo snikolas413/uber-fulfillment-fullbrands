@@ -59,7 +59,9 @@ A ação **Atualizar Omie** chama `StatusPedido` e reconcilia etapa, faturamento
 O faturamento é uma ação distinta de criação do pedido. A tela exige confirmação explícita. O servidor consulta o status atual, impede faturamento de pedidos cancelados/já faturados, exige etapa `50` (Faturar), executa `ValidarPedidoVenda` e só chama `FaturarPedidoVenda` quando a pré-validação retorna código de sucesso `0`. Depois consulta novamente `StatusPedido` para reconciliar o resultado.
 
 ### 4. Correios e expedição
-A equipe usa a integração Correios já configurada dentro do Omie para cotação, emissão da etiqueta e postagem. Depois dessa operação, o app chama apenas `ConsultarPedido` no Omie e copia para o banco local o que o ERP já registrou: transportadora, serviço/modalidade, frete, volumes, código de rastreio, link e previsão de entrega. A aplicação não gera etiquetas nem chama diretamente os Correios.
+A seleção de Mini Envios usa a API de Frete do Omie: `CotarFrete` e, para uma única opção Mini Envios da transportadora Correios, `SelecionarFrete` com `nIdFrete` e `lGratis: true`. A aplicação tenta essa etapa após a inclusão do pedido. Uma falha mantém o pedido criado, com aviso persistido e ação separada **Selecionar Mini Envios** para tratar a pendência sem repetir a inclusão.
+
+O vínculo do pedido, seu estado não cancelado/não faturado e a transportadora são conferidos antes da seleção; após a resposta, o pedido é consultado para conferir os dados retornados e frete zero para o cliente. O cenário fiscal permanece o atual e a PO será deixada vazia no teste. A automação não gera frete, etiqueta ou postagem. A equipe continua essas etapas no Omie, e a sincronização local importa os dados já registrados no ERP.
 
 ## Migrations
 As migrations abaixo foram aplicadas ao projeto Supabase conectado em 04/11/2026, sem criar branch adicional:

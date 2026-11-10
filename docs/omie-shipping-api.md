@@ -16,7 +16,11 @@ A ação consulta o pedido antes da gravação, exige o código de integração 
 
 ## Fluxo Correios
 
-Cotação e seleção de serviço são operações diferentes da atualização do cadastro de frete. A API Omie disponibiliza `CotarFrete` e `VincularFrete`; a geração do frete/etiqueta ocorre em operação separada (`GerarFrete`). Essas operações não são chamadas por esta implementação. A cotação, contratação, etiqueta e postagem continuam no fluxo Correios dentro do ERP até uma etapa futura, com aprovação operacional própria.
+Cotação e seleção de serviço são operações diferentes da atualização do cadastro de frete. A aplicação usa `CotarFrete` e `SelecionarFrete`, pelo ID `nIdFrete` da opção cotada, para selecionar Mini Envios com `lGratis: true` (frete grátis para o cliente). Essa seleção corresponde à opção de entrega acessada pelo botão do caminhão na aba Frete e Outras Despesas. Não usa o cadastro de TiposEntrega nem preenche `codigo_tipo_entrega` para simular essa escolha.
+
+Depois de criar um pedido, a aplicação tenta essa seleção automaticamente. Pedidos existentes ainda não faturados oferecem **Selecionar Mini Envios** para executar somente a etapa de frete. A operação confere o vínculo do pedido, a transportadora Correios e uma única opção Mini Envios. Consulta o pedido novamente antes de selecionar e depois da resposta, conferindo que o frete ao cliente ficou zero. A confirmação do serviço escolhido vem da resposta de `SelecionarFrete`; `ConsultarPedido` é usado para conferir os dados disponíveis do pedido.
+
+A aplicação não chama `GerarFrete`, `GerarEtiqueta` nem operações de postagem neste fluxo. Se a seleção falhar ou ficar incerta, o pedido continua criado e a pendência aparece na listagem. Não há repetição automática após timeout. Antes de tentar novamente, confira o pedido no ERP. `lGratis: true` não significa que o serviço dos Correios deixou de ter custo para a empresa.
 
 ## Observações operacionais
 
