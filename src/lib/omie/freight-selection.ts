@@ -32,7 +32,7 @@ export function isMiniEnviosName(value: unknown): boolean {
 
 function isMiniQuote(quote: FreightQuote) {
   const description = typeof quote.cDescricaoServico === "string" ? quote.cDescricaoServico.trim() : "";
-  const serviceMatches = isMiniEnviosName(description) || (!description && isMiniEnviosName(quote.cTipoServico));
+  const serviceMatches = isMiniEnviosName(description) || (!description && (isMiniEnviosName(quote.cTipoServico) || quote.cTipoServico === "04227"));
   const carrier = typeof quote.cNomeTransportadora === "string" ? normalize(quote.cNomeTransportadora) : "";
   return serviceMatches && (!carrier || correiosNames.has(carrier) || carrier === "ect" || carrier.startsWith("correioscontrato"));
 }
@@ -75,6 +75,39 @@ function checkResponse(response: { cCodStatus?: string; cDesStatus?: string }) {
   }
 }
 
+type QuoteResponse = { listaCotacao?: FreightQuote[]; cCodStatus?: string; cDesStatus?: string };
+
+async function quoteFreight(request: Request, orderId: number, integrationCode: string, carrierId: number) {
+  const quote = async () => {
+    const response = await request<QuoteResponse>("/produtos/frete/", "CotarFrete", { nIdPedido: orderId });
+    checkResponse(response);
+    return response;
+  };
+  try {
+    return await quote();
+  } catch (error) {
+    // Recover only this specific upstream failure. Do not retry selection or hide other errors.
+    if (!(error instanceof Error) || !/Nenhuma resposta foi obtida do servidor/i.test(error.message) ||
+      !/N[aã]o foram encontradas op[cç][oõ]es de entrega/i.test(error.message)) throw error;
+  }
+  const current = await readOrder(request, orderId, integrationCode);
+  if (current.frete?.codigo_transportadora !== carrierId) {
+    throw new FreightSelectionError("A transportadora mudou durante a cotação. Atualize o pedido antes de continuar.");
+  }
+  try {
+    const cleared = await request<{ cCodStatus?: string; cDesStatus?: string }>("/produtos/frete/", "CancelarCotacao", { nIdPedido: orderId });
+    // 100 means there was no quotation to clear, per the Frete API contract.
+    if (String(cleared.cCodStatus) !== "100") checkResponse(cleared);
+  } catch (error) {
+    throw new FreightSelectionError("Não foi possível renovar a cotação no Omie. " + (error instanceof Error ? error.message : "Confira a integração de frete."), "not_selected", { stage: "refresh_quote", options: [] });
+  }
+  try {
+    return await quote();
+  } catch (error) {
+    throw new FreightSelectionError("A cotação foi renovada, mas o Omie continuou recusando a consulta de frete. " + (error instanceof Error ? error.message : "Confira a integração de frete."), "not_selected", { stage: "quote_after_refresh", options: [] });
+  }
+}
+
 async function readOrder(request: Request, orderId: number, integrationCode: string): Promise<Order> {
   const response = await request<{ pedido_venda_produto?: Order }>("/produtos/pedido/", "ConsultarPedido", { codigo_pedido: orderId });
   const order = response.pedido_venda_produto;
@@ -109,8 +142,7 @@ export async function selectMiniEnviosFreight(request: Request, orderId: number,
   if (carrier.codigo_cliente_omie !== carrierId || ![carrier.razao_social, carrier.nome_fantasia].some(name => typeof name === "string" && correiosNames.has(normalize(name)))) {
     throw new FreightSelectionError("A transportadora do pedido não foi confirmada como Correios. Nenhuma opção de frete foi selecionada.");
   }
-  const response = await request<{ listaCotacao?: FreightQuote[]; cCodStatus?: string; cDesStatus?: string }>("/produtos/frete/", "CotarFrete", { nIdPedido: orderId });
-  checkResponse(response);
+  const response = await quoteFreight(request, orderId, integrationCode, carrierId);
   if (!Array.isArray(response.listaCotacao)) throw new FreightSelectionError("O Omie não retornou opções válidas para a cotação de frete.");
   if (!response.listaCotacao.length) throw new FreightSelectionError("O Omie retornou uma cotação sem opções de entrega. Nenhum frete foi selecionado.", "not_selected", quoteDiagnostic([]));
   const matches = response.listaCotacao.filter(isMiniQuote);

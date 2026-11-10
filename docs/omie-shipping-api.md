@@ -22,7 +22,11 @@ Depois de criar um pedido, a aplicação tenta essa seleção automaticamente. P
 
 O reconhecimento aceita descrições Mini Envios com os complementos de contrato dos Correios, como `CORREIOS MINI ENVIOS CTR AG` e `MINI ENVIOS CONTRATO TA`. Quando a descrição está vazia, também confere o nome do serviço em `cTipoServico`. Não seleciona PAC, SEDEX, nomes desconhecidos nem uma opção ambígua. Se nenhuma opção for reconhecida, o aviso e a auditoria registram apenas os campos de identificação dos serviços retornados (até 20 opções, com textos limitados), distinguindo esse caso de uma cotação vazia. Não registra credenciais nem o restante da resposta.
 
-A aplicação não chama `GerarFrete`, `GerarEtiqueta` nem operações de postagem neste fluxo. Se a seleção falhar ou ficar incerta, o pedido continua criado e a pendência aparece na listagem. Não há repetição automática após timeout. Antes de tentar novamente, confira o pedido no ERP. `lGratis: true` não significa que o serviço dos Correios deixou de ter custo para a empresa.
+A aplicação não chama `GerarFrete`, `GerarEtiqueta` nem operações de postagem neste fluxo. Se a seleção falhar ou ficar incerta, o pedido continua criado e a pendência aparece na listagem. Não há repetição automática da seleção após timeout. Antes de tentar novamente, confira o pedido no ERP. `lGratis: true` não significa que o serviço dos Correios deixou de ter custo para a empresa.
+
+Quando `CotarFrete` retorna especificamente a combinação “Nenhuma resposta foi obtida do servidor” e “Não foram encontradas opções de entrega”, a aplicação reconfere o vínculo, a situação e a transportadora do pedido, chama `CancelarCotacao` e faz uma única nova cotação. Isso permite recuperar uma cotação indisponível sem vincular um serviço às cegas. Outros erros, cotação vazia e serviços não reconhecidos não disparam renovação automática. Se a renovação ou a segunda consulta falhar, o aviso mantém a mensagem do Omie e a auditoria identifica `refresh_quote` ou `quote_after_refresh`. Não há garantia de recuperação se o erro persistir no serviço remoto.
+
+O código `04227` também identifica Mini Envios quando a API não fornece descrição; `03298` é PAC e não é aceito nesse caso. Referência: [Manual oficial API Faturas dos Correios](https://www.correios.com.br/atendimento/developers/manuais/manual-api-faturas). O código não substitui a cotação: é necessário receber uma opção válida e seu `nIdFrete`.
 
 ## Observações operacionais
 

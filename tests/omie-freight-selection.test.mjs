@@ -16,11 +16,12 @@ function loadModule(path, modules = {}) {
 const freight = loadModule('../src/lib/omie/freight-selection.ts');
 const id = '11111111-1111-4111-8111-111111111111';
 const integrationCode = 'UFB-' + id.replaceAll('-', '');
-const mini = { nIdFrete: 987, cTipoServico: '03298', cDescricaoServico: 'Mini Envios', cNomeTransportadora: 'CORREIOS', nDiasEntrega: 5, nValorFrete: 12.5 };
+const mini = { nIdFrete: 987, cTipoServico: '04227', cDescricaoServico: 'Mini Envios', cNomeTransportadora: 'CORREIOS', nDiasEntrega: 5, nValorFrete: 12.5 };
 
 function omieStub(options = {}) {
   const calls = [];
   let reads = 0;
+  let quotes = 0;
   let carrierAssigned = false;
   const request = async (endpoint, method, params) => {
     calls.push({ endpoint, method, params });
@@ -38,7 +39,18 @@ function omieStub(options = {}) {
     if (method === 'ListarClientes') return { pagina: 1, total_de_paginas: 1, clientes_cadastro: options.carriers ?? [{ codigo_cliente_omie: 123, razao_social: 'EMPRESA BRASILEIRA DE CORREIOS E TELEGRAFOS', inativo: 'N' }] };
     if (method === 'AlterarPedidoVenda') { carrierAssigned = true; return {}; }
     if (method === 'StatusPedido') return { codigo_pedido: 555, numero_pedido: '1128', etapa: '10' };
-    if (method === 'CotarFrete') return options.quoteResponse ?? { listaCotacao: options.quotes ?? [mini] };
+    if (method === 'CotarFrete') {
+      quotes++;
+      if (options.upstreamError && (quotes === 1 || options.alwaysQuoteError)) {
+        if (options.quoteStatusError) return { cCodStatus: '100', cDesStatus: options.upstreamError };
+        throw new Error(options.upstreamError);
+      }
+      return options.quoteResponse ?? { listaCotacao: options.quotes ?? [mini] };
+    }
+    if (method === 'CancelarCotacao') {
+      if (options.cancelError) throw new Error('Renovação indisponível');
+      return options.cancelResponse ?? {};
+    }
     if (method === 'SelecionarFrete') { if (options.selectTimeout) throw new Error('Timeout'); return options.selectResponse ?? {}; }
     if (method === 'IncluirPedido') return { codigo_pedido: 555, numero_pedido: '1128' };
     throw new Error('Método não autorizado no teste: ' + method);
@@ -203,8 +215,57 @@ test('relata opções não reconhecidas com diagnóstico restrito aos campos de 
   const { request, calls } = omieStub({ quotes: [{ ...mini, cDescricaoServico: 'SEDEX', unexpectedSecret: 'Não copiar este campo' }] });
   await assert.rejects(freight.selectMiniEnviosFreight(request, 555, integrationCode), error => {
     assert.match(error.message, /Opções: SEDEX/);
-    assert.deepEqual(error.diagnostic.options, [{ id: 987, type: '03298', description: 'SEDEX', carrier: 'CORREIOS' }]);
+    assert.deepEqual(error.diagnostic.options, [{ id: 987, type: '04227', description: 'SEDEX', carrier: 'CORREIOS' }]);
     return true;
   });
   assert.ok(!calls.some(call => call.method === 'SelecionarFrete'));
+});
+
+const upstreamError = 'Nenhuma resposta foi obtida do servidor!Não foram encontradas opções de entrega para este Pedido de Venda';
+
+test('renova uma vez a cotação com falha de resposta e seleciona apenas a nova opção', async () => {
+  for (const quoteStatusError of [false, true]) {
+    const { request, calls } = omieStub({ upstreamError, quoteStatusError });
+    await freight.selectMiniEnviosFreight(request, 555, integrationCode);
+    const methods = calls.map(call => call.method);
+    assert.equal(methods.filter(method => method === 'CotarFrete').length, 2);
+    assert.equal(methods.filter(method => method === 'CancelarCotacao').length, 1);
+    const refresh = calls.findIndex(call => call.method === 'CancelarCotacao');
+    assert.equal(methods[refresh - 1], 'ConsultarPedido');
+    assert.equal(methods[refresh + 1], 'CotarFrete');
+    assert.deepEqual(calls[refresh].params, { nIdPedido: 555 });
+    assert.equal(methods.filter(method => method === 'SelecionarFrete').length, 1);
+  }
+});
+
+test('interrompe se renovação falhar ou se segunda cotação continuar indisponível', async () => {
+  for (const options of [{ cancelError: true }, { alwaysQuoteError: true }]) {
+    const { request, calls } = omieStub({ upstreamError, ...options });
+    await assert.rejects(freight.selectMiniEnviosFreight(request, 555, integrationCode), error => {
+      assert.equal(error.outcome, 'not_selected');
+      assert.equal(error.diagnostic.stage, options.cancelError ? 'refresh_quote' : 'quote_after_refresh');
+      return true;
+    });
+    assert.equal(calls.filter(call => call.method === 'CancelarCotacao').length, 1);
+    assert.ok(!calls.some(call => call.method === 'SelecionarFrete'));
+    assert.ok(calls.filter(call => call.method === 'CotarFrete').length <= 2);
+  }
+});
+
+test('não renova cotações válidas vazias nem outros erros de negócio', async () => {
+  for (const options of [{ quotes: [] }, { upstreamError: 'Sem cobertura para o CEP informado' }]) {
+    const { request, calls } = omieStub(options);
+    await assert.rejects(freight.selectMiniEnviosFreight(request, 555, integrationCode));
+    assert.ok(!calls.some(call => ['CancelarCotacao', 'SelecionarFrete'].includes(call.method)));
+  }
+  const noPreviousQuote = omieStub({ upstreamError, cancelResponse: { cCodStatus: '100', cDesStatus: 'Cotação não encontrada' } });
+  await freight.selectMiniEnviosFreight(noPreviousQuote.request, 555, integrationCode);
+});
+
+test('reconhece o código oficial Mini Envios quando descrição não é retornada, sem aceitar PAC', async () => {
+  const recognized = omieStub({ quotes: [{ ...mini, cDescricaoServico: '' }] });
+  await freight.selectMiniEnviosFreight(recognized.request, 555, integrationCode);
+  const pac = omieStub({ quotes: [{ ...mini, cDescricaoServico: '', cTipoServico: '03298' }] });
+  await assert.rejects(freight.selectMiniEnviosFreight(pac.request, 555, integrationCode));
+  assert.ok(!pac.calls.some(call => call.method === 'SelecionarFrete'));
 });
