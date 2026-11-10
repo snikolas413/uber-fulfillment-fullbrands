@@ -63,6 +63,8 @@ A seleção de Mini Envios usa a API de Frete do Omie: `CotarFrete` e, para uma 
 
 O vínculo do pedido, seu estado não cancelado/não faturado e a transportadora são conferidos antes da seleção; após a resposta, o pedido é consultado para conferir os dados retornados e frete zero para o cliente. O cenário fiscal permanece o atual e a PO será deixada vazia no teste. A automação não gera frete, etiqueta ou postagem. A equipe continua essas etapas no Omie, e a sincronização local importa os dados já registrados no ERP.
 
+A criação resolve no Omie um único cadastro ativo de EMPRESA BRASILEIRA DE CORREIOS E TELEGRAFOS e envia seu ID em `frete.codigo_transportadora`. Em pedido existente sem transportadora, a ação de Mini Envios define esse mesmo cadastro e confere a gravação antes de cotar. Não sobrescreve outra transportadora existente. A auditoria de pendências registra o motivo, e **Atualizar Omie** preserva avisos iniciados por `Frete:` até que a seleção seja concluída.
+
 ## Migrations
 As migrations abaixo foram aplicadas ao projeto Supabase conectado em 04/11/2026, sem criar branch adicional:
 - `20261104130000_prepare_uber_fulfillment_customer_email.sql`

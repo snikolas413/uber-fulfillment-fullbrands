@@ -22,6 +22,30 @@ const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u0
 const miniNames = new Set(["minienvios", "correiosminienvios", "minienvioscorreios"]);
 const correiosNames = new Set(["correios", "empresabrasileiradecorreiosetelegrafos"]);
 
+type Carrier = { codigo_cliente_omie: number; razao_social?: string; nome_fantasia?: string; inativo?: string };
+
+export async function resolveCorreiosCarrier(request: Request): Promise<number> {
+  const matches: Carrier[] = [];
+  let pages = 1;
+  for (let page = 1; page <= pages; page++) {
+    const response = await request<{ pagina: number; total_de_paginas: number; clientes_cadastro?: Carrier[] }>("/geral/clientes/", "ListarClientes", {
+      pagina: page, registros_por_pagina: 100, apenas_importado_api: "N",
+      clientesFiltro: { razao_social: "EMPRESA BRASILEIRA DE CORREIOS E TELEGRAFOS", inativo: "N" },
+    });
+    if (!Array.isArray(response.clientes_cadastro) || response.pagina !== page || !Number.isInteger(response.total_de_paginas) ||
+      response.total_de_paginas < page || response.total_de_paginas > 100) {
+      throw new FreightSelectionError("Não foi possível consultar o cadastro da transportadora Correios no Omie.");
+    }
+    pages = response.total_de_paginas;
+    matches.push(...response.clientes_cadastro.filter(carrier => carrier.inativo === "N" && typeof carrier.razao_social === "string" &&
+      normalize(carrier.razao_social) === "empresabrasileiradecorreiosetelegrafos"));
+  }
+  if (matches.length !== 1 || !Number.isSafeInteger(matches[0].codigo_cliente_omie) || matches[0].codigo_cliente_omie <= 0) {
+    throw new FreightSelectionError("É necessário um único cadastro ativo de EMPRESA BRASILEIRA DE CORREIOS E TELEGRAFOS no Omie. Confira a transportadora antes de continuar.");
+  }
+  return matches[0].codigo_cliente_omie;
+}
+
 function checkResponse(response: { cCodStatus?: string; cDesStatus?: string }) {
   if (response.cCodStatus != null && response.cCodStatus !== "" && String(response.cCodStatus) !== "0") {
     throw new FreightSelectionError(response.cDesStatus || "O Omie não confirmou a operação de frete.");
@@ -42,10 +66,21 @@ async function readOrder(request: Request, orderId: number, integrationCode: str
 
 /** Selects a quoted freight option. Does not generate freight, labels or invoices. */
 export async function selectMiniEnviosFreight(request: Request, orderId: number, integrationCode: string) {
-  const before = await readOrder(request, orderId, integrationCode);
-  const carrierId = before.frete?.codigo_transportadora;
-  if (!carrierId || !Number.isSafeInteger(carrierId) || carrierId <= 0) {
-    throw new FreightSelectionError("Defina a transportadora EMPRESA BRASILEIRA DE CORREIOS E TELEGRAFOS no pedido antes de selecionar Mini Envios.");
+  let before = await readOrder(request, orderId, integrationCode);
+  let carrierId = before.frete?.codigo_transportadora;
+  if (!carrierId) {
+    carrierId = await resolveCorreiosCarrier(request);
+    await request("/produtos/pedido/", "AlterarPedidoVenda", {
+      cabecalho: { codigo_pedido: orderId, codigo_pedido_integracao: integrationCode },
+      frete: { codigo_transportadora: carrierId },
+    });
+    before = await readOrder(request, orderId, integrationCode);
+    if (before.frete?.codigo_transportadora !== carrierId) {
+      throw new FreightSelectionError("A definição da transportadora Correios não foi confirmada no Omie. Atualize o pedido para conferir antes de repetir.");
+    }
+  }
+  if (!Number.isSafeInteger(carrierId) || carrierId <= 0) {
+    throw new FreightSelectionError("O pedido retornou um código de transportadora inválido.");
   }
   const carrier = await request<{ codigo_cliente_omie?: number; razao_social?: string; nome_fantasia?: string }>("/geral/clientes/", "ConsultarCliente", { codigo_cliente_omie: carrierId });
   if (carrier.codigo_cliente_omie !== carrierId || ![carrier.razao_social, carrier.nome_fantasia].some(name => typeof name === "string" && correiosNames.has(normalize(name)))) {

@@ -5,7 +5,7 @@ import ts from 'typescript';
 
 function loadModule(path, modules = {}) {
   const exports = {};
-  const code = ts.transpileModule(readFileSync(new URL(path, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
+  const code = ts.transpileModule(readFileSync(new URL(path, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2017 } }).outputText;
   new Function('require', 'exports', code)(name => {
     if (!(name in modules)) throw new Error('Unexpected module: ' + name);
     return modules[name];
@@ -21,6 +21,7 @@ const mini = { nIdFrete: 987, cTipoServico: '03298', cDescricaoServico: 'Mini En
 function omieStub(options = {}) {
   const calls = [];
   let reads = 0;
+  let carrierAssigned = false;
   const request = async (endpoint, method, params) => {
     calls.push({ endpoint, method, params });
     if (method === 'ConsultarPedido') {
@@ -29,11 +30,14 @@ function omieStub(options = {}) {
       return { pedido_venda_produto: {
         cabecalho: { codigo_pedido: 555, codigo_pedido_integracao: options.wrongLink ? 'outro' : integrationCode },
         infoCadastro: { cancelado: options.cancelled ? 'S' : 'N', faturado: options.invoiced ? 'S' : 'N' },
-        frete: { codigo_transportadora: options.noCarrier ? 0 : options.changedCarrier && reads >= 2 ? 999 : 123,
+        frete: { codigo_transportadora: options.noCarrier && (!carrierAssigned || options.assignmentFailure) ? 0 : options.changedCarrier && reads >= 2 ? 999 : 123,
           valor_frete: options.notFree && reads === 3 ? 12.5 : 0, quantidade_volumes: 1, modalidade: '9' },
       } };
     }
     if (method === 'ConsultarCliente') return { codigo_cliente_omie: 123, razao_social: options.otherCarrier ? 'Transportadora diferente' : 'EMPRESA BRASILEIRA DE CORREIOS E TELEGRAFOS' };
+    if (method === 'ListarClientes') return { pagina: 1, total_de_paginas: 1, clientes_cadastro: options.carriers ?? [{ codigo_cliente_omie: 123, razao_social: 'EMPRESA BRASILEIRA DE CORREIOS E TELEGRAFOS', inativo: 'N' }] };
+    if (method === 'AlterarPedidoVenda') { carrierAssigned = true; return {}; }
+    if (method === 'StatusPedido') return { codigo_pedido: 555, numero_pedido: '1128', etapa: '10' };
     if (method === 'CotarFrete') return options.quoteResponse ?? { listaCotacao: options.quotes ?? [mini] };
     if (method === 'SelecionarFrete') { if (options.selectTimeout) throw new Error('Timeout'); return options.selectResponse ?? {}; }
     if (method === 'IncluirPedido') return { codigo_pedido: 555, numero_pedido: '1128' };
@@ -55,7 +59,7 @@ test('cota e seleciona o nIdFrete Mini Envios com lGratis true, sem gerar frete 
 
 test('não seleciona quando vínculo, situação, transportadora ou cotação são inválidos', async () => {
   for (const options of [
-    { wrongLink: true }, { cancelled: true }, { invoiced: true }, { noCarrier: true }, { otherCarrier: true }, { changedCarrier: true },
+    { wrongLink: true }, { cancelled: true }, { invoiced: true }, { noCarrier: true, assignmentFailure: true }, { otherCarrier: true }, { changedCarrier: true },
     { quotes: [] }, { quotes: [mini, { ...mini, nIdFrete: 988 }] },
     { quotes: [{ ...mini, cDescricaoServico: 'SEDEX' }] }, { quotes: [{ ...mini, nIdFrete: 0 }] },
     { quotes: [{ ...mini, cNomeTransportadora: 'Outra transportadora' }] },
@@ -87,6 +91,7 @@ function actionsStub(options = {}) {
   const writes = [], audits = [], shipments = [];
   const row = {
     id, status: options.status ?? 'ready', omie_order_id: options.status ? 555 : null,
+    omie_last_error: options.freightError ?? null,
     omie_customer_id: 2867720329, omie_tax_scenario_id: 2954399884,
     customer_purchase_order: null, customer_email: 'teste@example.com',
     recipients: { full_name: 'Teste', document_number: '00000000000', phone: '11000000000' },
@@ -122,9 +127,10 @@ test('criação mantém PO e cenário e depois seleciona a opção de frete cota
   const { actions, calls, audits, shipments } = actionsStub();
   const result = await actions.sendOrderToOmieAction(id);
   assert.equal(result.status, 'success');
-  const payload = calls[0].params;
-  assert.equal(calls[0].method, 'IncluirPedido'); assert.equal(payload.cabecalho.codigo_cenario_impostos, 2954399884);
-  assert.ok(!('frete' in payload)); assert.ok(!('numero_pedido_compra' in payload.det[0].inf_adic));
+  assert.equal(calls[0].method, 'ListarClientes');
+  const payload = calls.find(call => call.method === 'IncluirPedido').params;
+  assert.equal(payload.cabecalho.codigo_cenario_impostos, 2954399884);
+  assert.deepEqual(payload.frete, { codigo_transportadora: 123 }); assert.ok(!('numero_pedido_compra' in payload.det[0].inf_adic));
   assert.equal(audits[1].action, 'omie.freight.selected'); assert.equal(audits[1].after_summary.freight_quote_id, 987);
   assert.equal(shipments[0].freight_amount, 0);
 });
@@ -149,4 +155,34 @@ test('ação de frete em pedido existente não inclui novo pedido e respeita per
     assert.notEqual((await denied.actions.selectMiniEnviosFreightAction(id)).status, 'success');
     assert.equal(denied.calls.length, 0);
   }
+});
+
+test('pedido existente sem transportadora recebe Correios e depois seleciona Mini Envios', async () => {
+  const { request, calls } = omieStub({ noCarrier: true });
+  const result = await freight.selectMiniEnviosFreight(request, 555, integrationCode);
+  assert.equal(result.carrierId, 123);
+  const update = calls.find(call => call.method === 'AlterarPedidoVenda');
+  assert.deepEqual(update.params, { cabecalho: { codigo_pedido: 555, codigo_pedido_integracao: integrationCode }, frete: { codigo_transportadora: 123 } });
+  assert.ok(calls.findIndex(call => call.method === 'AlterarPedidoVenda') < calls.findIndex(call => call.method === 'CotarFrete'));
+});
+
+test('cadastro Correios ausente, inativo ou ambíguo bloqueia a criação antes de reservar', async () => {
+  const carrier = { codigo_cliente_omie: 123, razao_social: 'EMPRESA BRASILEIRA DE CORREIOS E TELEGRAFOS', inativo: 'N' };
+  for (const carriers of [[], [{ ...carrier, inativo: 'S' }], [carrier, { ...carrier, codigo_cliente_omie: 456 }]]) {
+    const { actions, calls, writes } = actionsStub({ carriers });
+    assert.equal((await actions.sendOrderToOmieAction(id)).status, 'error');
+    assert.ok(!calls.some(call => call.method === 'IncluirPedido'));
+    assert.equal(writes.length, 0);
+  }
+});
+
+test('sincronizar pedido preserva o erro de frete e auditoria guarda o motivo de falha', async () => {
+  const message = 'Frete: Mini Envios indisponível';
+  const synced = actionsStub({ status: 'order_created', freightError: message });
+  assert.equal((await synced.actions.syncOmieOrderAction(id)).status, 'success');
+  assert.equal(synced.writes[0].omie_last_error, message);
+  const pending = actionsStub({ status: 'order_created', quotes: [] });
+  await pending.actions.selectMiniEnviosFreightAction(id);
+  assert.match(pending.audits[0].after_summary.message, /Mini Envios não está disponível/);
+  assert.match(pending.writes[0].omie_last_error, /^Frete: /);
 });

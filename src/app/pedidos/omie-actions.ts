@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { callOmie, OmieApiError, OmieConfigurationError } from "@/lib/omie/client";
-import { selectMiniEnviosFreight, FreightSelectionError } from "@/lib/omie/freight-selection";
+import { selectMiniEnviosFreight, resolveCorreiosCarrier, FreightSelectionError } from "@/lib/omie/freight-selection";
 
 export type OmieActionResult = { status: "success" | "error" | "warning"; message: string };
 type Recipient = { full_name: string; document_number: string | null; email: string | null; phone: string | null };
@@ -13,6 +13,7 @@ type Fulfillment = {
   id: string; status: string; omie_order_id: number | null; omie_order_number: string | null;
   omie_customer_id: number | null; omie_tax_scenario_id: number | null;
   customer_purchase_order: string | null; customer_email: string | null;
+  omie_last_error?: string | null;
   recipients: Recipient | Recipient[] | null; delivery_addresses: Address | Address[] | null; fulfillment_items: Item[] | null;
 };
 type OmieInvoice = { chave_nfe?: string; numero_nfe?: string; serie_nfe?: string; protocolo?: string | number; status_nfe?: string; data_emissao?: string; danfe?: string; xml_distr?: string };
@@ -70,7 +71,7 @@ async function context() {
 }
 async function load(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, id: string) {
   const { data, error } = await supabase.from("fulfillments")
-    .select("id,status,omie_order_id,omie_order_number,omie_customer_id,omie_tax_scenario_id,customer_purchase_order,customer_email,recipients(full_name,document_number,email,phone),delivery_addresses(street,number,complement,district,city,state,postal_code,validation_status),fulfillment_items(omie_product_id,product_code,description,ncm,cfop,unit,quantity,unit_price)")
+    .select("id,status,omie_order_id,omie_order_number,omie_customer_id,omie_tax_scenario_id,customer_purchase_order,customer_email,omie_last_error,recipients(full_name,document_number,email,phone),delivery_addresses(street,number,complement,district,city,state,postal_code,validation_status),fulfillment_items(omie_product_id,product_code,description,ncm,cfop,unit,quantity,unit_price)")
     .eq("id", id).maybeSingle();
   if (error || !data) throw new Error("Não foi possível carregar o pedido local.");
   return data as unknown as Fulfillment;
@@ -108,7 +109,7 @@ async function reconcile(supabase: Awaited<ReturnType<typeof createSupabaseServe
   const { error } = await supabase.from("fulfillments").update({
     status: next, omie_order_id: status.codigo_pedido ?? row.omie_order_id,
     omie_order_number: status.numero_pedido ?? row.omie_order_number,
-    omie_last_sync_at: now, omie_last_error: null,
+    omie_last_sync_at: now, omie_last_error: row.omie_last_error?.startsWith("Frete: ") ? row.omie_last_error : null,
   }).eq("id", row.id);
   if (error) throw new Error("O Omie foi consultado, mas não foi possível atualizar o pedido local.");
 
@@ -145,7 +146,7 @@ function validateOrder(row: Fulfillment) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("O e-mail para NF-e é inválido.");
   return { recipient, address, item, email };
 }
-async function includeOrder(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, userId: string, row: Fulfillment): Promise<OmieActionResult> {
+async function includeOrder(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, userId: string, row: Fulfillment, carrierId: number): Promise<OmieActionResult> {
   const { recipient, address, item, email } = validateOrder(row);
   const po = row.customer_purchase_order?.trim() ?? "";
   const city = address.city.trim().toLocaleUpperCase("pt-BR") + " (" + address.state.trim().toUpperCase() + ")";
@@ -156,6 +157,7 @@ async function includeOrder(supabase: Awaited<ReturnType<typeof createSupabaseSe
       data_previsao: todayInSaoPaulo(), etapa: "10", codigo_parcela: "000",
       ...(row.omie_tax_scenario_id ? { codigo_cenario_impostos: row.omie_tax_scenario_id } : {}),
     },
+    frete: { codigo_transportadora: carrierId },
     informacoes_adicionais: {
       codigo_categoria: "1.01.03", codigo_conta_corrente: 2611948369,
       numero_pedido_cliente: po || "", dados_adicionais_nf: po ? "Purchase Order #" + po + "|" : "",
@@ -204,7 +206,7 @@ async function applyMiniEnviosFreight(supabase: Awaited<ReturnType<typeof create
   let selected = false;
   const persistMessage = async (message: string | null) => {
     try {
-      await supabase.from("fulfillments").update({ omie_last_error: message?.slice(0, 500) ?? null }).eq("id", row.id);
+      await supabase.from("fulfillments").update({ omie_last_error: message ? ("Frete: " + message).slice(0, 500) : null }).eq("id", row.id);
     } catch { console.error("Não foi possível registrar o resultado local da seleção de frete."); }
     revalidatePath("/pedidos");
   };
@@ -234,6 +236,7 @@ async function applyMiniEnviosFreight(supabase: Awaited<ReturnType<typeof create
     await audit(supabase, userId, row.id, "omie.freight.selection_pending", {
       omie_order_id: row.omie_order_id,
       outcome: selected ? "selected" : error instanceof FreightSelectionError ? error.outcome : "not_selected",
+      message: errorMessage(error).slice(0, 500),
     }).catch(() => console.error("Não foi possível registrar a pendência de seleção de frete na auditoria."));
     const message = errorMessage(error) + " O pedido permanece criado; não reenvie a inclusão do pedido.";
     await persistMessage(message);
@@ -275,6 +278,7 @@ export async function sendOrderToOmieAction(id: string, confirmRetry = false): P
       return { status: "error", message: "O status local não permite enviar este pedido ao Omie." };
     }
 
+    const carrierId = await resolveCorreiosCarrier(callOmie);
     if (row.status === "ready") {
       const { data: lock, error } = await supabase.from("fulfillments").update({
         status: "order_pending", omie_last_error: null,
@@ -290,7 +294,7 @@ export async function sendOrderToOmieAction(id: string, confirmRetry = false): P
     }
 
     try {
-      return await includeOrder(supabase, userId, row);
+      return await includeOrder(supabase, userId, row, carrierId);
     } catch (error) {
       const message = errorMessage(error);
       await supabase.from("fulfillments").update({
