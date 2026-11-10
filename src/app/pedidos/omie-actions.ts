@@ -5,6 +5,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { callOmie, OmieApiError, OmieConfigurationError } from "@/lib/omie/client";
 import { selectMiniEnviosFreight, resolveCorreiosCarrier, FreightSelectionError, isMiniEnviosName } from "@/lib/omie/freight-selection";
 import { invoiceExistingOrder, type BillingOutcome, type BillingControlState } from "@/lib/omie/invoice-order";
+import { resolveItemIcms, simulateOtherItemTaxes, ItemIcmsError } from "@/lib/omie/item-icms";
 
 export type OmieActionResult = { status: "success" | "error" | "warning"; message: string };
 type Recipient = { full_name: string; document_number: string | null; email: string | null; phone: string | null };
@@ -50,7 +51,7 @@ function parseOmieDate(value: string | null | undefined): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 function errorMessage(error: unknown) {
-  if (error instanceof OmieConfigurationError || error instanceof OmieApiError || error instanceof FreightSelectionError) return error.message;
+  if (error instanceof OmieConfigurationError || error instanceof OmieApiError || error instanceof FreightSelectionError || error instanceof ItemIcmsError) return error.message;
   return "Falha de comunicação com o Omie. Consulte o status antes de tentar novamente.";
 }
 function isNotFound(error: unknown) {
@@ -147,7 +148,7 @@ function validateOrder(row: Fulfillment) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("O e-mail para NF-e é inválido.");
   return { recipient, address, item, email };
 }
-async function includeOrder(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, userId: string, row: Fulfillment, carrierId: number): Promise<OmieActionResult> {
+async function includeOrder(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, userId: string, row: Fulfillment, carrierId: number, itemTaxes: Record<string, unknown>): Promise<OmieActionResult> {
   const { recipient, address, item, email } = validateOrder(row);
   const po = row.customer_purchase_order?.trim() ?? "";
   const city = address.city.trim().toLocaleUpperCase("pt-BR") + " (" + address.state.trim().toUpperCase() + ")";
@@ -172,6 +173,7 @@ async function includeOrder(supabase: Awaited<ReturnType<typeof createSupabaseSe
     },
     det: [{
       ide: { codigo_item_integracao: itemIntegrationCode(row.id) },
+      imposto: itemTaxes,
       produto: {
         codigo_produto: item.omie_product_id, codigo: item.product_code, descricao: item.description,
         cfop: item.cfop ?? "6.117", ncm: item.ncm ?? "8517.62.99", unidade: item.unit,
@@ -289,6 +291,12 @@ export async function sendOrderToOmieAction(id: string, confirmRetry = false): P
     }
 
     const carrierId = await resolveCorreiosCarrier(callOmie);
+    const { address, item } = validateOrder(row);
+    const scenarioId = Number(row.omie_tax_scenario_id);
+    const customerId = row.omie_customer_id ?? 2867720329;
+    const itemIcms = await resolveItemIcms(callOmie, { scenarioId, customerId, productId: item.omie_product_id, finalConsumer: "S" });
+    const otherTaxes = await simulateOtherItemTaxes(callOmie, { scenarioId, customerId, productId: item.omie_product_id,
+      quantity: Number(item.quantity), unitPrice: Number(item.unit_price), deliveryState: address.state });
     if (row.status === "ready") {
       const { data: lock, error } = await supabase.from("fulfillments").update({
         status: "order_pending", omie_last_error: null,
@@ -304,7 +312,7 @@ export async function sendOrderToOmieAction(id: string, confirmRetry = false): P
     }
 
     try {
-      return await includeOrder(supabase, userId, row, carrierId);
+      return await includeOrder(supabase, userId, row, carrierId, { ...otherTaxes, ...itemIcms });
     } catch (error) {
       const message = errorMessage(error);
       await supabase.from("fulfillments").update({

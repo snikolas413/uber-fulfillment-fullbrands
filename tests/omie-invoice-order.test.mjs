@@ -12,7 +12,8 @@ function loadModule(path, modules = {}) {
   }, exports);
   return exports;
 }
-const billing = loadModule('../src/lib/omie/invoice-order.ts');
+const itemIcms = loadModule('../src/lib/omie/item-icms.ts');
+const billing = loadModule('../src/lib/omie/invoice-order.ts', { '@/lib/omie/item-icms': itemIcms });
 const freight = loadModule('../src/lib/omie/freight-selection.ts');
 const id = '11111111-1111-4111-8111-111111111111';
 const integrationCode = 'UFB-' + id.replaceAll('-', '');
@@ -26,16 +27,20 @@ function omie(options = {}) {
   const request = async (endpoint, method, params) => {
     calls.push({ endpoint, method, params });
     if (method === 'ConsultarPedido') return { pedido_venda_produto: {
-      cabecalho: { codigo_pedido: options.wrongOrder ? 999 : 555, codigo_pedido_integracao: integrationCode, codigo_cenario_impostos: '777', etapa: options.stage ?? '10', bloqueado: options.blocked ? 'S' : 'N' },
+      cabecalho: { codigo_pedido: options.wrongOrder ? 999 : 555, codigo_pedido_integracao: integrationCode, codigo_cenario_impostos: '777', codigo_cliente: 888, etapa: options.stage ?? '10', bloqueado: options.blocked ? 'S' : 'N' },
       infoCadastro: { faturado: options.alreadyBilled ? 'S' : 'N', cancelado: options.cancelled ? 'S' : 'N' },
       frete: { codigo_transportadora: options.changedCarrier ? 999 : 123, ...(options.omitFreight ? {} : { valor_frete: options.notFree ? 12 : 0 }) },
-      informacoes_adicionais: { outros_detalhes: { cEstadoOd: 'SC', cEnderecoOd: 'Rua Teste' } },
+      informacoes_adicionais: { consumidor_final: 'S', outros_detalhes: { cEstadoOd: 'SC', cEnderecoOd: 'Rua Teste' } },
       det: [{ ide: { codigo_item: 1234, codigo_item_integracao: 'item-teste', simples_nacional: options.simples ? 'S' : 'N' },
         produto: { codigo_produto: 987, codigo: 'R18', quantidade: 1, valor_unitario: refreshed && options.changedPrice ? 99 : 107.97, valor_total: 122.01 },
         inf_adic: { codigo_cenario_impostos_item: '777', nao_gerar_financeiro: 'S', nao_movimentar_estoque: 'S' },
-        imposto: options.missingIcms && (!refreshed || options.stillMissing) ? {} : options.simples ? { icms_sn: { cod_sit_trib_icms_sn: '102' } } : { icms: { cod_sit_trib_icms: '00' } },
+        imposto: options.missingIcms && (!refreshed || options.stillMissing) ? {} : options.simples ? { icms_sn: { cod_sit_trib_icms_sn: '102', origem_icms_sn: '1', aliq_icms_sn: 0 } } : {
+          icms: { cod_sit_trib_icms: '00', origem_icms: '1', modalidade_icms: '3', perc_red_base_icms: 0, aliq_icms: 4, base_icms: options.noBase ? 0 : 126.03, valor_icms: 5.04 },
+        },
       }],
     } };
+    if (method === 'ConsultarProduto') return { codigo_produto: params.codigo_produto, recomendacoes_fiscais: { origem_mercadoria: '1' } };
+    if (method === 'ListarImpostosCenario') return { ...params, impostos: { cst_icms: '00', modalidade_bc_icms: '3', reducao_bc_icms: 0, aliquota_icms: 4, perc_fcp_icms: 0, csosn: '102', aliquota_icms_simples: 0 } };
     if (method === 'AlterarPedidoVenda') { refreshed = true; return { codigo_status: options.refreshError ? '1' : '0', descricao_status: 'Atualização fiscal recusada' }; }
     if (method === 'TrocarEtapaPedido') return { codigo_status: options.stageError ? '1' : '0', descricao_status: 'Etapa não liberada' };
     if (method === 'StatusPedido') {
@@ -90,8 +95,11 @@ test('ICMS ausente reaplica o cenário já escolhido, preservando dados e endere
       ide: { codigo_item: 1234, codigo_item_integracao: 'item-teste' },
       produto: { codigo_produto: 987, quantidade: 1, valor_unitario: 107.97, codigo: 'R18' },
       inf_adic: { codigo_cenario_impostos_item: 777, nao_gerar_financeiro: 'S', nao_movimentar_estoque: 'S' },
+      imposto: simples ? { icms_sn: { cod_sit_trib_icms_sn: '102', origem_icms_sn: '1', aliq_icms_sn: 0 } } : {
+        icms: { cod_sit_trib_icms: '00', origem_icms: '1', modalidade_icms: '3', perc_red_base_icms: 0, aliq_icms: 4, perc_fcp_icms: 0 },
+      },
     }] });
-    assert.ok(!('imposto' in refresh.params.det[0]));
+    assert.ok(!('base_icms' in (refresh.params.det[0].imposto.icms ?? {})));
     assert.ok(!('informacoes_adicionais' in refresh.params));
     assert.equal(calls.filter(call => call.method === 'AlterarPedidoVenda').length, 1);
     assert.ok(calls.findIndex(call => call.method === 'AlterarPedidoVenda') < calls.findIndex(call => call.method === 'ValidarPedidoVenda'));
@@ -99,11 +107,11 @@ test('ICMS ausente reaplica o cenário já escolhido, preservando dados e endere
 });
 
 test('atualização fiscal sem CST, recusada ou com mudança de preço não solicita faturamento', async () => {
-  for (const options of [{ stillMissing: true }, { refreshError: true }, { changedPrice: true }]) {
+  for (const options of [{ stillMissing: true }, { refreshError: true }, { changedPrice: true }, { noBase: true }]) {
     const { args, calls, states } = omie({ missingIcms: true, ...options });
     const result = await billing.invoiceExistingOrder(args);
     assert.equal(result.outcome, 'rejected');
-    if (options.stillMissing) assert.match(result.message, /cenário fiscal 777.*situação tributária de ICMS/);
+    if (options.stillMissing || options.noBase) assert.match(result.message, /não confirmou os campos e o cálculo de ICMS.*777/);
     assert.ok(!calls.some(call => ['ValidarPedidoVenda', 'FaturarPedidoVenda'].includes(call.method)));
     assert.deepEqual(states, ['billing_rejected']);
   }
@@ -191,6 +199,7 @@ function actionHarness(options = {}) {
   const actions = loadModule('../src/app/pedidos/omie-actions.ts', {
     'next/cache': { revalidatePath() {} }, '@/lib/supabase/server': { createSupabaseServerClient: async () => client },
     '@/lib/omie/freight-selection': freight, '@/lib/omie/invoice-order': billing,
+    '@/lib/omie/item-icms': itemIcms,
     '@/lib/omie/client': { callOmie: upstream.args.request, OmieApiError: ApiError, OmieConfigurationError: ApiError },
   });
   return { actions, records, calls: upstream.calls };
