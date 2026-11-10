@@ -118,6 +118,6 @@ export function BillingManagement({ rows, canBill }: { rows: BillingRow[]; canBi
         </tr>;
       })}</tbody>
     </table></div> : <div className="recipient-empty"><span className="recipient-empty-icon"><FileText size={24} /></span><strong>Nenhum pedido aguardando faturamento</strong><p>Envie os pedidos preparados ao Omie para selecioná-los nesta fila.</p></div>}
-    <div className="recipient-table-footer"><span>Exibindo até 100 pedidos recentes · até 100 por lote</span><span>Uma falha não interrompe os demais pedidos. Emissões sem confirmação não são reenviadas automaticamente.</span></div>
+    <div className="recipient-table-footer"><span>Até 100 pendentes por lote e 100 faturados recentes. A fila carrega os próximos pendentes ao atualizar.</span><span>Uma falha não interrompe os demais pedidos. Emissões sem confirmação não são reenviadas automaticamente.</span></div>
   </section>;
 }

@@ -44,7 +44,7 @@ export default async function BillingPage() {
   if (profileError || !profile?.is_active) redirect("/acesso-negado");
   const canBill = ["admin", "gestor", "operador"].includes(profile.role);
 
-  const [preparedResult, billingResult] = await Promise.all([
+  const [preparedResult, pendingResult, billedResult] = await Promise.all([
     supabase
       .from("fulfillments")
       .select("id, customer_purchase_order, customer_email, created_at, recipients(full_name), fulfillment_items(product_code, description, quantity, unit_price, line_total)")
@@ -54,13 +54,19 @@ export default async function BillingPage() {
     supabase
       .from("fulfillments")
       .select("id, status, omie_order_id, omie_order_number, omie_last_error, created_at, recipients(full_name), invoices(omie_invoice_number, access_key, status, issued_at, danfe_url, xml_available), shipments(carrier_id, service_code, freight_amount)")
-      .in("status", ["order_created", "billing_pending", "billed"])
+      .in("status", ["order_created", "billing_pending"])
+      .order("created_at", { ascending: true })
+      .limit(100),
+    supabase
+      .from("fulfillments")
+      .select("id, status, omie_order_id, omie_order_number, omie_last_error, created_at, recipients(full_name), invoices(omie_invoice_number, access_key, status, issued_at, danfe_url, xml_available), shipments(carrier_id, service_code, freight_amount)")
+      .eq("status", "billed")
       .order("created_at", { ascending: false })
       .limit(100),
   ]);
 
   const preparedRows = (preparedResult.data ?? []) as unknown as PreparedRow[];
-  const rows = (billingResult.data ?? []) as unknown as BillingRow[];
+  const rows = [...(pendingResult.data ?? []), ...(billedResult.data ?? [])] as unknown as BillingRow[];
   const pending = rows.filter((row) => row.status === "order_created" || row.status === "billing_pending").length;
   const billed = rows.filter((row) => row.status === "billed").length;
   const preparedValue = preparedRows.reduce(
@@ -103,7 +109,7 @@ export default async function BillingPage() {
         <div className="recipient-table-footer"><span>{preparedRows.length} preparação(ões) nesta fila</span><span>A sincronização consulta o Omie. O faturamento é uma ação fiscal separada e exige confirmação.</span></div>
       </section>
 
-      {billingResult.error ? <div className="recipient-alert recipient-alert-error">Não foi possível consultar a fila fiscal.</div> : <BillingManagement rows={rows} canBill={canBill} />}
+      {pendingResult.error || billedResult.error ? <div className="recipient-alert recipient-alert-error">Não foi possível consultar a fila fiscal.</div> : <BillingManagement rows={rows} canBill={canBill} />}
     </div>
   );
 }
