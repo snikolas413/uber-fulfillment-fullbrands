@@ -10,6 +10,7 @@ import { prepareOrderAction } from "./actions";
 import type { OrderActionState } from "./actions";
 import { OmieActionButton } from "@/components/omie-action-button";
 import { ShippingEditor } from "@/app/expedicao/shipping-editor";
+import { OmieDeliveryStatus } from "@/components/omie-delivery-status";
 
 type Address = {
   id: string;
@@ -299,6 +300,7 @@ function OrderDraftModal({
             <label className="field-wide">Purchase Order Uber (opcional)<input name="customer_purchase_order" maxLength={30} placeholder="Ex.: 656083" /></label>
           </div>
 
+          <OmieDeliveryStatus />
           <div className="recipient-form-note"><ShieldCheck size={15} /> O rascunho é salvo no Supabase com chave de idempotência e auditoria. Nenhuma operação é enviada ao Omie.</div>
           {state.status === "error" && <div className="recipient-alert recipient-alert-error">{state.message}</div>}
           <div className="recipient-form-actions">

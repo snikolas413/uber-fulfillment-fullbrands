@@ -42,6 +42,14 @@ O e-mail salvo na preparação local é enviado em `informacoes_adicionais.utili
 ## Ciclo operacional no aplicativo
 
 ### 1. Preparar e criar pedido
+
+O tipo de entrega de novos pedidos é **Mini Envios**. Antes de reservar ou incluir o pedido, o servidor consulta `ListarTipoEntrega` em `/geral/tiposentrega/`, percorre as páginas e exige um único cadastro ativo com descrição Mini Envios (também aceita Correios - Mini Envios / Mini Envios Correios, ignorando acentos e pontuação). Não usa busca parcial nem um código numérico presumido.
+
+O `nCodEntrega` retornado é enviado como `frete.codigo_tipo_entrega`; se o cadastro informa uma transportadora (`nCodTransp` positivo), ela acompanha em `frete.codigo_transportadora`. O `cCodIntEntrega` identifica a integração do cadastro, mas não substitui o código numérico no pedido. A modalidade CIF/FOB não é definida por essa seleção.
+
+Cadastro ausente, inativo, ambíguo ou resposta inválida bloqueia a inclusão antes de alterar o status local. O formulário oferece **Conferir tipo no Omie**, que consulta o catálogo e mostra o código, sem criar pedido. A inclusão registra o tipo e a transportadora na auditoria. Pedidos existentes não são alterados automaticamente.
+
+Para o teste atual, a PO será deixada vazia e o cenário fiscal permanece `2954399884`. A seleção de Mini Envios preenche o tipo de entrega; cotação, contratação, etiqueta e postagem continuam no fluxo do ERP.
 A preparação local fica no Supabase com chave estável `UFB-<uuid>`. Ao clicar em **Enviar ao Omie**, o servidor:
 1. confere sessão e perfil admin/gestor/operador;
 2. confere destinatário, endereço, e-mail e item;
