@@ -32,7 +32,8 @@ function omieStub(options = {}) {
         cabecalho: { codigo_pedido: 555, codigo_pedido_integracao: options.wrongLink ? 'outro' : integrationCode },
         infoCadastro: { cancelado: options.cancelled ? 'S' : 'N', faturado: options.invoiced ? 'S' : 'N' },
         frete: { codigo_transportadora: options.noCarrier && (!carrierAssigned || options.assignmentFailure) ? 0 : options.changedCarrier && reads >= 2 ? 999 : 123,
-          valor_frete: options.notFree && reads === 3 ? 12.5 : 0, quantidade_volumes: 1, modalidade: '9' },
+          ...(options.omitFreightAmount ? {} : { valor_frete: options.notFree && reads === 3 ? 12.5 : options.invalidFreightAmount ? null : 0 }),
+          quantidade_volumes: 1, modalidade: '9' },
       } };
     }
     if (method === 'ConsultarCliente') return { codigo_cliente_omie: 123, razao_social: options.otherCarrier ? 'Transportadora diferente' : 'EMPRESA BRASILEIRA DE CORREIOS E TELEGRAFOS' };
@@ -92,10 +93,25 @@ test('timeout na seleção não é repetido e retorna resultado desconhecido', a
 test('distingue rejeição de seleção aceita com falha na conferência posterior', async () => {
   const rejected = omieStub({ selectResponse: { cCodStatus: '100', cDesStatus: 'Cotação expirada' } });
   await assert.rejects(freight.selectMiniEnviosFreight(rejected.request, 555, integrationCode), error => error.outcome === 'not_selected');
-  for (const options of [{ afterError: true }, { notFree: true }]) {
+  for (const options of [{ afterError: true }, { notFree: true }, { invalidFreightAmount: true }]) {
     const { request } = omieStub(options);
     await assert.rejects(freight.selectMiniEnviosFreight(request, 555, integrationCode), error => error.outcome === 'selected');
   }
+});
+
+test('frete grátis confirmado com valor omitido limpa o aviso e registra sucesso local', async () => {
+  const { request, calls } = omieStub({ omitFreightAmount: true });
+  const selected = await freight.selectMiniEnviosFreight(request, 555, integrationCode);
+  assert.equal(selected.freeForCustomer, true);
+  assert.ok(!Object.hasOwn(selected.freight, 'valor_frete'));
+  assert.deepEqual(calls.find(call => call.method === 'SelecionarFrete').params, { nIdFrete: 987, lGratis: true });
+  const pending = actionsStub({ status: 'order_created', omitFreightAmount: true, freightError: 'Frete: Conferência não concluída' });
+  const result = await pending.actions.selectMiniEnviosFreightAction(id);
+  assert.equal(result.status, 'success');
+  assert.equal(pending.audits[0].action, 'omie.freight.selected');
+  assert.equal(pending.audits[0].after_summary.free_for_customer, true);
+  assert.equal(pending.shipments[0].freight_amount, 0);
+  assert.equal(pending.writes.at(-1).omie_last_error, null);
 });
 
 function actionsStub(options = {}) {

@@ -169,7 +169,10 @@ export async function selectMiniEnviosFreight(request: Request, orderId: number,
   checkResponse(selection);
   try {
     const saved = await readOrder(request, orderId, integrationCode);
-    if (saved.frete?.codigo_transportadora !== carrierId || Number(saved.frete?.valor_frete) !== 0) {
+    // ConsultarPedido can omit zero-valued fields. Only apply this default after
+    // SelecionarFrete accepted lGratis:true and the order/carrier were rechecked.
+    const freightAmount = saved.frete?.valor_frete === undefined ? 0 : saved.frete.valor_frete;
+    if (saved.frete?.codigo_transportadora !== carrierId || !Number.isFinite(freightAmount) || freightAmount !== 0) {
       throw new Error("Frete grátis não confirmado");
     }
     return { quote, carrierId, freight: saved.frete, freeForCustomer: true as const };
