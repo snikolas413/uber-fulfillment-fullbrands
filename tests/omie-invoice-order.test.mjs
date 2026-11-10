@@ -19,17 +19,24 @@ const integrationCode = 'UFB-' + id.replaceAll('-', '');
 
 function omie(options = {}) {
   const calls = [], states = [];
-  let requested = false, locked = false;
+  let requested = false, locked = false, refreshed = false;
   const snapshot = () => ({ codigo_pedido: 555, codigo_pedido_integracao: integrationCode, numero_pedido: '1140', etapa: '50',
     faturada: options.alreadyBilled || (requested && !options.delayed) ? 'S' : 'N',
     ListaNfe: options.alreadyBilled || (requested && !options.delayed) ? [{ numero_nfe: '123', chave_nfe: 'chave-teste' }] : [], ...options.status });
   const request = async (endpoint, method, params) => {
     calls.push({ endpoint, method, params });
     if (method === 'ConsultarPedido') return { pedido_venda_produto: {
-      cabecalho: { codigo_pedido: options.wrongOrder ? 999 : 555, codigo_pedido_integracao: integrationCode, etapa: options.stage ?? '10', bloqueado: options.blocked ? 'S' : 'N' },
+      cabecalho: { codigo_pedido: options.wrongOrder ? 999 : 555, codigo_pedido_integracao: integrationCode, codigo_cenario_impostos: '777', etapa: options.stage ?? '10', bloqueado: options.blocked ? 'S' : 'N' },
       infoCadastro: { faturado: options.alreadyBilled ? 'S' : 'N', cancelado: options.cancelled ? 'S' : 'N' },
       frete: { codigo_transportadora: options.changedCarrier ? 999 : 123, ...(options.omitFreight ? {} : { valor_frete: options.notFree ? 12 : 0 }) },
+      informacoes_adicionais: { outros_detalhes: { cEstadoOd: 'SC', cEnderecoOd: 'Rua Teste' } },
+      det: [{ ide: { codigo_item: 1234, codigo_item_integracao: 'item-teste', simples_nacional: options.simples ? 'S' : 'N' },
+        produto: { codigo_produto: 987, codigo: 'R18', quantidade: 1, valor_unitario: refreshed && options.changedPrice ? 99 : 107.97, valor_total: 122.01 },
+        inf_adic: { codigo_cenario_impostos_item: '777', nao_gerar_financeiro: 'S', nao_movimentar_estoque: 'S' },
+        imposto: options.missingIcms && (!refreshed || options.stillMissing) ? {} : options.simples ? { icms_sn: { cod_sit_trib_icms_sn: '102' } } : { icms: { cod_sit_trib_icms: '00' } },
+      }],
     } };
+    if (method === 'AlterarPedidoVenda') { refreshed = true; return { codigo_status: options.refreshError ? '1' : '0', descricao_status: 'Atualização fiscal recusada' }; }
     if (method === 'TrocarEtapaPedido') return { codigo_status: options.stageError ? '1' : '0', descricao_status: 'Etapa não liberada' };
     if (method === 'StatusPedido') {
       if (requested && options.afterReadError) throw new Error('Consulta indisponível');
@@ -70,6 +77,36 @@ test('não muda etapa já preparada nem reemite pedido já faturado', async () =
   const billed = omie({ alreadyBilled: true });
   assert.equal((await billing.invoiceExistingOrder(billed.args)).outcome, 'confirmed');
   assert.deepEqual(billed.calls.map(call => call.method), ['ConsultarPedido', 'StatusPedido']);
+});
+
+test('ICMS ausente reaplica o cenário já escolhido, preservando dados e endereços sem fixar CST', async () => {
+  for (const simples of [false, true]) {
+    const { args, calls } = omie({ missingIcms: true, simples });
+    const result = await billing.invoiceExistingOrder(args);
+    assert.equal(result.outcome, 'confirmed');
+    assert.equal(result.taxScenarioRefreshRequested, true);
+    const refresh = calls.find(call => call.method === 'AlterarPedidoVenda');
+    assert.deepEqual(refresh.params, { cabecalho: { codigo_pedido: 555, codigo_pedido_integracao: integrationCode }, det: [{
+      ide: { codigo_item: 1234, codigo_item_integracao: 'item-teste' },
+      produto: { codigo_produto: 987, quantidade: 1, valor_unitario: 107.97, codigo: 'R18' },
+      inf_adic: { codigo_cenario_impostos_item: 777, nao_gerar_financeiro: 'S', nao_movimentar_estoque: 'S' },
+    }] });
+    assert.ok(!('imposto' in refresh.params.det[0]));
+    assert.ok(!('informacoes_adicionais' in refresh.params));
+    assert.equal(calls.filter(call => call.method === 'AlterarPedidoVenda').length, 1);
+    assert.ok(calls.findIndex(call => call.method === 'AlterarPedidoVenda') < calls.findIndex(call => call.method === 'ValidarPedidoVenda'));
+  }
+});
+
+test('atualização fiscal sem CST, recusada ou com mudança de preço não solicita faturamento', async () => {
+  for (const options of [{ stillMissing: true }, { refreshError: true }, { changedPrice: true }]) {
+    const { args, calls, states } = omie({ missingIcms: true, ...options });
+    const result = await billing.invoiceExistingOrder(args);
+    assert.equal(result.outcome, 'rejected');
+    if (options.stillMissing) assert.match(result.message, /cenário fiscal 777.*situação tributária de ICMS/);
+    assert.ok(!calls.some(call => ['ValidarPedidoVenda', 'FaturarPedidoVenda'].includes(call.method)));
+    assert.deepEqual(states, ['billing_rejected']);
+  }
 });
 
 test('bloqueia cancelamento, vínculo, frete, etapa, status fiscal e validação inválidos antes da emissão', async () => {

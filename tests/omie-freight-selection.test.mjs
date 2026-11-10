@@ -160,6 +160,7 @@ test('criação mantém PO e cenário e depois seleciona a opção de frete cota
   assert.equal(calls[0].method, 'ListarClientes');
   const payload = calls.find(call => call.method === 'IncluirPedido').params;
   assert.equal(payload.cabecalho.codigo_cenario_impostos, 2954399884);
+  assert.equal(payload.det[0].inf_adic.codigo_cenario_impostos_item, 2954399884);
   assert.deepEqual(payload.frete, { codigo_transportadora: 123 }); assert.ok(!('numero_pedido_compra' in payload.det[0].inf_adic));
   assert.equal(audits[1].action, 'omie.freight.selected'); assert.equal(audits[1].after_summary.freight_quote_id, 987);
   assert.equal(shipments[0].freight_amount, 0);

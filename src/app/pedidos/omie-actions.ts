@@ -178,6 +178,7 @@ async function includeOrder(supabase: Awaited<ReturnType<typeof createSupabaseSe
         quantidade: Number(item.quantity), valor_unitario: Number(item.unit_price),
       },
       inf_adic: {
+        ...(row.omie_tax_scenario_id ? { codigo_cenario_impostos_item: row.omie_tax_scenario_id } : {}),
         ...(po ? { numero_pedido_compra: po.slice(0, 15) } : {}),
         nao_movimentar_estoque: "S", nao_gerar_financeiro: "S",
       },
@@ -368,7 +369,7 @@ export async function invoiceOrderAction(id: string, confirmed = false): Promise
       try { await reconcile(supabase, userId, row, result.snapshot); }
       catch { message += " Não foi possível atualizar a cópia local. Consulte o Omie antes de repetir."; status = "warning"; }
     }
-    await audit(supabase, userId, id, "omie.invoice.result", { omie_order_id: row.omie_order_id, outcome: result.outcome, message: message.slice(0, 500) });
+    await audit(supabase, userId, id, "omie.invoice.result", { omie_order_id: row.omie_order_id, outcome: result.outcome, tax_scenario_refresh_requested: Boolean(result.taxScenarioRefreshRequested), message: message.slice(0, 500) });
     await supabase.from("fulfillments").update({ omie_last_error: status === "success" ? null : ("Faturamento: " + message).slice(0, 500) }).eq("id", id);
     revalidatePath("/faturamento"); revalidatePath("/pedidos");
     return { status, message, billingOutcome: result.outcome };
