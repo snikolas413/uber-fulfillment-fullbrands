@@ -1,4 +1,4 @@
-import { resolveItemIcms, preserveOtherItemTaxes, hasCompleteItemIcms } from "@/lib/omie/item-icms";
+import { simulateItemTaxes, hasCompleteItemIcms } from "@/lib/omie/item-icms";
 
 export type BillingOutcome = "confirmed" | "submitted" | "unknown" | "rejected" | "blocked";
 export type BillingControlState = "billing_processing" | "billing_submitted" | "billing_unknown" | "billing_rejected";
@@ -16,9 +16,9 @@ type BillingItem = {
 };
 type BillingOrder = {
   cabecalho?: { codigo_pedido?: number; codigo_pedido_integracao?: string; codigo_cenario_impostos?: number | string; codigo_cliente?: number; etapa?: string; bloqueado?: string };
-  informacoes_adicionais?: { consumidor_final?: string };
+  informacoes_adicionais?: { consumidor_final?: string; outros_detalhes?: { cEstadoOd?: string } };
   infoCadastro?: { faturado?: string; cancelado?: string };
-  frete?: { codigo_transportadora?: number; valor_frete?: number };
+  frete?: { codigo_transportadora?: number; valor_frete?: number; valor_seguro?: number; outras_despesas?: number };
   det?: BillingItem[];
 };
 type BillingResult = { outcome: BillingOutcome; message: string; snapshot?: BillingStatus; taxScenarioRefreshRequested?: boolean };
@@ -29,14 +29,19 @@ async function scenarioRefreshItems(request: Request, order: BillingOrder) {
   if (!Array.isArray(order.det) || !order.det.length) throw new Error("O Omie não retornou os itens para conferência fiscal.");
   const updates = [];
   for (const item of order.det.filter(item => !hasIcmsSituation(item))) {
+    if (Number(item.produto?.valor_desconto ?? 0) !== 0 || Number(item.produto?.percentual_desconto ?? 0) !== 0 ||
+      Number(order.frete?.valor_seguro ?? 0) !== 0 || Number(order.frete?.outras_despesas ?? 0) !== 0) {
+      throw new Error("O pedido possui descontos ou despesas fora do modelo 1107. Confira o cálculo fiscal no Omie antes de faturar.");
+    }
     const scenario = Number(item.inf_adic?.codigo_cenario_impostos_item ?? order.cabecalho?.codigo_cenario_impostos);
     if (!Number.isSafeInteger(scenario) || scenario <= 0 || !Number.isSafeInteger(item.ide?.codigo_item) || !item.ide?.codigo_item ||
       !Number.isSafeInteger(item.produto?.codigo_produto) || !item.produto?.codigo_produto ||
       !Number.isFinite(item.produto?.quantidade) || Number(item.produto?.quantidade) <= 0 || !Number.isFinite(item.produto?.valor_unitario)) {
       throw new Error("Não foi possível confirmar o cenário e os dados do item para atualizar os impostos. Nenhuma emissão foi solicitada.");
     }
-    const taxFields = await resolveItemIcms(request, { scenarioId: scenario, customerId: Number(order.cabecalho?.codigo_cliente),
-      productId: item.produto.codigo_produto, finalConsumer: order.informacoes_adicionais?.consumidor_final ?? "", simples: item.ide.simples_nacional === "S" });
+    const taxFields = await simulateItemTaxes(request, { scenarioId: scenario, customerId: Number(order.cabecalho?.codigo_cliente),
+      productId: item.produto.codigo_produto, quantity: Number(item.produto.quantidade), unitPrice: Number(item.produto.valor_unitario),
+      deliveryState: order.informacoes_adicionais?.outros_detalhes?.cEstadoOd?.trim().toUpperCase() ?? "" });
     updates.push({
       ide: { codigo_item: item.ide.codigo_item, ...(item.ide.codigo_item_integracao ? { codigo_item_integracao: item.ide.codigo_item_integracao } : {}) },
       produto: { codigo_produto: item.produto.codigo_produto, quantidade: item.produto.quantidade, valor_unitario: item.produto.valor_unitario,
@@ -45,7 +50,7 @@ async function scenarioRefreshItems(request: Request, order: BillingOrder) {
       inf_adic: { codigo_cenario_impostos_item: scenario,
         ...(item.inf_adic?.nao_gerar_financeiro ? { nao_gerar_financeiro: item.inf_adic.nao_gerar_financeiro } : {}),
         ...(item.inf_adic?.nao_movimentar_estoque ? { nao_movimentar_estoque: item.inf_adic.nao_movimentar_estoque } : {}) },
-      imposto: { ...preserveOtherItemTaxes(item.imposto), ...taxFields },
+      imposto: taxFields,
     });
   }
   return updates;

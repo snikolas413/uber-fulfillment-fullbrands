@@ -6,7 +6,7 @@ const exports = {};
 new Function('exports', ts.transpileModule(readFileSync(new URL('../src/lib/omie/item-icms.ts', import.meta.url), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2017 },
 }).outputText)(exports);
-const { resolveItemIcms, preserveOtherItemTaxes, hasCompleteItemIcms, simulateOtherItemTaxes } = exports;
+const { resolveItemIcms, preserveOtherItemTaxes, hasCompleteItemIcms, simulateItemTaxes } = exports;
 const args = { scenarioId: 777, customerId: 888, productId: 987, finalConsumer: 'S' };
 
 function stub(options = {}) {
@@ -17,7 +17,9 @@ function stub(options = {}) {
     if (method === 'ListarImpostosCenario') return { ...params, codigo_cenario: options.wrongScenario ? 1 : 777,
       impostos: { cst_icms: '00', modalidade_bc_icms: '3', aliquota_icms: 4, reducao_bc_icms: 0, perc_fcp_icms: 0, ...options.taxes } };
     if (method === 'SimularImpostos') return { codigo_cliente: params.codigo_cliente, det_simul_resp: [{ codigo_cenario_impostos_item: 777,
-      produto_simul_resp: { codigo_produto: 987 }, imposto: { ipi: { cod_sit_trib_ipi: '50', aliq_ipi: 13, tipo_calculo_ipi: 'B', enquadramento_ipi: '999', base_ipi: 500, valor_ipi: 65 } },
+      produto_simul_resp: { ...params.det_simul[0].produto_simul }, imposto: {
+        icms: options.emptyIcms ? {} : { cod_sit_trib_icms: '00', origem_icms: '1', modalidade_icms: '3', perc_red_base_icms: 0, aliq_icms: 4, base_icms: 500, valor_icms: 20 },
+        cbs: { valor_cbs: 5 }, ipi: { cod_sit_trib_ipi: '50', aliq_ipi: 13, tipo_calculo_ipi: 'B', enquadramento_ipi: '999', base_ipi: 500, valor_ipi: 65 } },
     }] };
     throw new Error('Método inesperado: ' + method);
   };
@@ -58,13 +60,17 @@ test('preserva parâmetros dos outros tributos, sem reenviar bases e valores ant
 
 test('simula o pedido com quantidade, preço, cenário e destino reais antes da inclusão', async () => {
   const { request, calls } = stub();
-  const otherTaxes = await simulateOtherItemTaxes(request, { ...args, quantity: 2, unitPrice: 111.53, deliveryState: 'SC' });
+  const otherTaxes = await simulateItemTaxes(request, { ...args, quantity: 2, unitPrice: 111.53, deliveryState: 'SC' });
   const payload = calls[0].params;
   assert.equal(calls[0].method, 'SimularImpostos');
   assert.equal(payload.uf_entrega, 'SC');
   assert.deepEqual(payload.det_simul, [{ codigo_cenario_impostos_item: 777, produto_simul: { codigo_produto: 987, quantidade: 2, valor_unitario: 111.53, valor_desconto: 0 } }]);
   assert.equal(otherTaxes.ipi.aliq_ipi, 13);
-  assert.ok(!('base_ipi' in otherTaxes.ipi));
+  assert.equal(otherTaxes.ipi.base_ipi, 500);
+  assert.equal(otherTaxes.ipi.valor_ipi, 65);
+  assert.equal(otherTaxes.icms.valor_icms, 20);
+  assert.ok(!('cbs' in otherTaxes));
+  await assert.rejects(simulateItemTaxes(stub({ emptyIcms: true }).request, { ...args, quantity: 2, unitPrice: 111.53, deliveryState: 'SC' }), /UF de entrega SC/);
 });
 
 test('confere o cálculo de cada pedido sem usar a base 126,03 como constante', () => {

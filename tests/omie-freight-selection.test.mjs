@@ -42,9 +42,10 @@ function omieStub(options = {}) {
     if (method === 'ConsultarProduto') return { codigo_produto: params.codigo_produto, recomendacoes_fiscais: { origem_mercadoria: '1' } };
     if (method === 'ListarImpostosCenario') return { ...params, codigo_cenario: options.badTaxScenario ? 0 : params.codigo_cenario, impostos: { cst_icms: '00', modalidade_bc_icms: '3', reducao_bc_icms: 0, aliquota_icms: 4, perc_fcp_icms: 0 } };
     if (method === 'SimularImpostos') return { codigo_cliente: params.codigo_cliente, det_simul_resp: [{
-      codigo_cenario_impostos_item: params.det_simul[0].codigo_cenario_impostos_item,
-      produto_simul_resp: { codigo_produto: params.det_simul[0].produto_simul.codigo_produto },
-      imposto: { ipi: { cod_sit_trib_ipi: '50', aliq_ipi: 13, enquadramento_ipi: '999', tipo_calculo_ipi: 'B', base_ipi: 107.97, valor_ipi: 14.04 } },
+      codigo_cenario_impostos_item: options.badTaxScenario ? 0 : params.det_simul[0].codigo_cenario_impostos_item,
+      produto_simul_resp: { ...params.det_simul[0].produto_simul },
+      imposto: { icms: options.emptyIcms ? {} : { cod_sit_trib_icms: '00', origem_icms: '1', modalidade_icms: '3', perc_red_base_icms: 0, aliq_icms: 4, base_icms: 107.96, valor_icms: 4.32 },
+        ipi: { cod_sit_trib_ipi: '50', aliq_ipi: 13, enquadramento_ipi: '999', tipo_calculo_ipi: 'B', base_ipi: 95.54, valor_ipi: 12.42 } },
     }] };
     if (method === 'ListarClientes') return { pagina: 1, total_de_paginas: 1, clientes_cadastro: options.carriers ?? [{ codigo_cliente_omie: 123, razao_social: 'EMPRESA BRASILEIRA DE CORREIOS E TELEGRAFOS', inativo: 'N' }] };
     if (method === 'AlterarPedidoVenda') { carrierAssigned = true; return {}; }
@@ -133,7 +134,7 @@ function actionsStub(options = {}) {
     customer_purchase_order: null, customer_email: 'teste@example.com',
     recipients: { full_name: 'Teste', document_number: '00000000000', phone: '11000000000' },
     delivery_addresses: { street: 'Rua Teste', number: '1', district: 'Centro', city: 'Navegantes', state: 'SC', postal_code: '88370000', validation_status: 'pending' },
-    fulfillment_items: [{ omie_product_id: 2948561716, product_code: 'R18', description: 'REMOTE BUTTON', ncm: '8517.62.99', cfop: '6.117', unit: 'PC', quantity: 1, unit_price: 107.97 }],
+    fulfillment_items: [{ omie_product_id: 2948561716, product_code: 'R18', description: 'REMOTE BUTTON', ncm: '8517.62.99', cfop: '6.117', unit: 'PC', quantity: 1, unit_price: options.unitPrice ?? 95.54 }],
   };
   const client = {
     auth: { getUser: async () => ({ data: { user: { id: 'user-1' } }, error: null }) },
@@ -157,12 +158,13 @@ function actionsStub(options = {}) {
     '@/lib/omie/freight-selection': freight,
     '@/lib/omie/invoice-order': billing,
     '@/lib/omie/item-icms': itemIcms,
+    '@/lib/omie/order-reference': loadModule('../src/lib/omie/order-reference.ts'),
     '@/lib/omie/client': { callOmie: omie.request, OmieApiError: ApiError, OmieConfigurationError: ApiError },
   });
   return { actions, writes, audits, shipments, calls: omie.calls };
 }
 
-test('criação mantém PO e cenário e depois seleciona a opção de frete cotada', async () => {
+test('criação segue referência 1107 com impostos completos, e-mail do destinatário e Mini Envios grátis', async () => {
   const { actions, calls, audits, shipments } = actionsStub();
   const result = await actions.sendOrderToOmieAction(id);
   assert.equal(result.status, 'success');
@@ -170,11 +172,17 @@ test('criação mantém PO e cenário e depois seleciona a opção de frete cota
   const payload = calls.find(call => call.method === 'IncluirPedido').params;
   assert.equal(payload.cabecalho.codigo_cenario_impostos, 2954399884);
   assert.equal(payload.det[0].inf_adic.codigo_cenario_impostos_item, 2954399884);
-  assert.deepEqual(payload.det[0].imposto.icms, { cod_sit_trib_icms: '00', origem_icms: '1', modalidade_icms: '3', perc_red_base_icms: 0, aliq_icms: 4, perc_fcp_icms: 0 });
+  assert.deepEqual(payload.det[0].imposto.icms, { cod_sit_trib_icms: '00', origem_icms: '1', modalidade_icms: '3', perc_red_base_icms: 0, aliq_icms: 4, base_icms: 107.96, valor_icms: 4.32 });
   assert.equal(payload.det[0].imposto.ipi.aliq_ipi, 13);
-  assert.ok(!('base_icms' in payload.det[0].imposto.icms));
-  assert.ok(!('valor_ipi' in payload.det[0].imposto.ipi));
-  assert.deepEqual(payload.frete, { codigo_transportadora: 123 }); assert.ok(!('numero_pedido_compra' in payload.det[0].inf_adic));
+  assert.equal(payload.det[0].imposto.ipi.valor_ipi, 12.42);
+  assert.equal(payload.det[0].produto.valor_unitario, 95.54);
+  assert.equal(payload.det[0].produto.codigo_tabela_preco, 2);
+  assert.equal(payload.det[0].produto.ean, '0035399175763');
+  assert.equal(payload.det[0].inf_adic.codigo_local_estoque, 1579847408);
+  assert.equal(payload.det[0].inf_adic.nao_movimentar_estoque, 'N');
+  assert.equal(payload.det[0].inf_adic.nao_gerar_financeiro, 'N');
+  assert.equal(payload.informacoes_adicionais.utilizar_emails, 'teste@example.com');
+  assert.deepEqual(payload.frete, { codigo_transportadora: 123 }); assert.equal(payload.det[0].inf_adic.numero_pedido_compra, '');
   assert.equal(audits[1].action, 'omie.freight.selected'); assert.equal(audits[1].after_summary.freight_quote_id, 987);
   assert.equal(shipments[0].freight_amount, 0);
   assert.equal(calls.filter(call => call.method === 'IncluirPedido').length, 1);
@@ -211,9 +219,20 @@ test('falha na consulta fiscal antes da criação não inclui nem deixa pedido p
   const { actions, calls, writes } = actionsStub({ badTaxScenario: true });
   const result = await actions.sendOrderToOmieAction(id);
   assert.equal(result.status, 'error');
-  assert.match(result.message, /não confirmou os dados fiscais/);
+  assert.match(result.message, /não confirmou os impostos/);
   assert.ok(!calls.some(call => call.method === 'IncluirPedido'));
   assert.ok(!writes.some(write => write.status === 'order_pending'));
+});
+
+test('ICMS vazio para a UF de entrega e preço fora da referência bloqueiam antes da inclusão', async () => {
+  for (const options of [{ emptyIcms: true }, { unitPrice: 107.97 }]) {
+    const { actions, calls, writes } = actionsStub(options);
+    const result = await actions.sendOrderToOmieAction(id);
+    assert.equal(result.status, 'error');
+    assert.match(result.message, options.emptyIcms ? /UF de entrega SC/ : /referência 1107/);
+    assert.ok(!calls.some(call => call.method === 'IncluirPedido'));
+    assert.ok(!writes.some(write => write.status === 'order_pending'));
+  }
 });
 
 test('ação de frete em pedido existente não inclui novo pedido e respeita perfil e status', async () => {

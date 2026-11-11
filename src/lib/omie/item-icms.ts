@@ -82,16 +82,28 @@ export function preserveOtherItemTaxes(taxes: Record<string, unknown> | undefine
   }));
 }
 
-export async function simulateOtherItemTaxes(request: Request, { scenarioId, customerId, productId, quantity, unitPrice, deliveryState }: {
+export async function simulateItemTaxes(request: Request, { scenarioId, customerId, productId, quantity, unitPrice, deliveryState }: {
   scenarioId: number; customerId: number; productId: number; quantity: number; unitPrice: number; deliveryState: string;
 }) {
-  const result = await request<{ codigo_cliente?: number; det_simul_resp?: { codigo_cenario_impostos_item?: number; produto_simul_resp?: { codigo_produto?: number }; imposto?: Record<string, unknown> }[] }>("/produtos/pedido/", "SimularImpostos", {
+  if (!/^[A-Z]{2}$/.test(deliveryState) || ![scenarioId, customerId, productId].every(id => Number.isSafeInteger(id) && id > 0) ||
+    !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice <= 0) throw new ItemIcmsError("Confirme os dados do item e a UF de entrega antes de simular os impostos.");
+  const result = await request<{ codigo_cliente?: number; det_simul_resp?: { codigo_cenario_impostos_item?: number; produto_simul_resp?: { codigo_produto?: number; quantidade?: number; valor_unitario?: number }; imposto?: Record<string, unknown> }[] }>("/produtos/pedido/", "SimularImpostos", {
     codigo_cliente: customerId, consumidor_final: "S", uf_entrega: deliveryState,
     frete_simul: { valor_frete: 0, valor_seguro: 0, outras_despesas: 0 },
     det_simul: [{ codigo_cenario_impostos_item: scenarioId, produto_simul: { codigo_produto: productId, quantidade: quantity, valor_unitario: unitPrice, valor_desconto: 0 } }],
   });
   const item = result.det_simul_resp?.[0];
   if (result.codigo_cliente !== customerId || result.det_simul_resp?.length !== 1 || Number(item?.codigo_cenario_impostos_item) !== scenarioId ||
-    item?.produto_simul_resp?.codigo_produto !== productId || !item.imposto) throw new ItemIcmsError("O Omie não confirmou os impostos do item na simulação do cenário selecionado.");
-  return preserveOtherItemTaxes(item.imposto);
+    item?.produto_simul_resp?.codigo_produto !== productId || item.produto_simul_resp.quantidade !== quantity ||
+    item.produto_simul_resp.valor_unitario !== unitPrice || !item.imposto) throw new ItemIcmsError("O Omie não confirmou os impostos do item na simulação do cenário selecionado.");
+  if (!hasCompleteItemIcms(item.imposto, Boolean(item.imposto.icms_sn && Object.keys(item.imposto.icms_sn).length))) {
+    throw new ItemIcmsError("O cenário " + scenarioId + " não retornou ICMS completo para a UF de entrega " + deliveryState + ". Ajuste a regra no Omie. Nenhuma emissão foi solicitada.");
+  }
+  // Manual taxes are respected as supplied by Omie. Keep the simulated bases and amounts,
+  // never the historical amounts of order 1107. IBS/CBS fields are read-only on this API.
+  const groups = ["icms", "icms_sn", "icms_st", "icms_ie", "ipi", "pis_padrao", "cofins_padrao", "pis_st", "cofins_st", "inss", "irrf", "csll", "iss"];
+  return Object.fromEntries(groups.flatMap(group => {
+    const value = item.imposto?.[group];
+    return value && typeof value === "object" && !Array.isArray(value) ? [[group, value]] : [];
+  }));
 }

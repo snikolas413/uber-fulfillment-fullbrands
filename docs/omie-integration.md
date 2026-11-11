@@ -28,10 +28,10 @@ O webhook que aparece na tela da integração Omie não é necessário ao fluxo 
 - Cliente Uber do Brasil Tecnologia Ltda., código Omie `2867720329`.
 - Produto REMOTE BUTTON, código `R18`, ID Omie `2948561716`.
 - Unidade `PC`, NCM `8517.62.99`.
-- Preço de catálogo consultado: R$ 107,97. Há pedido anterior com valor negociado diferente (R$ 95,54), por isso o valor continua editável e deve ser conferido por pedido.
+- Padrão aprovado em 11/11/2026: pedido 1107, uma unidade a R$ 95,54, preço fixo e PO vazio.
 - Cenário observado em venda para entrega futura: ID `2954399884`, descrição `5.117/6.117`, com CFOP de item `6.117`.
 - Pedidos recentes consultados usam etapa inicial `10`, parcela `000`, categoria `1.01.03`, conta corrente `2611948369`, consumidor final `S`, e-mail automático `N`.
-- Nos pedidos de entrega futura analisados, o item utilizou `nao_movimentar_estoque = S` e `nao_gerar_financeiro = S`.
+- Novas inclusões seguem o pedido 1107: `nao_movimentar_estoque = N` e `nao_gerar_financeiro = N`; estoque 1579847408.
 - Esses valores são referências reais observadas, não substituem a aprovação fiscal/comercial antes do primeiro pedido real.
 
 ## Endereço e e-mail do motorista

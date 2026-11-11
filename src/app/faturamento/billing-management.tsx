@@ -52,7 +52,7 @@ export function BillingManagement({ rows, canBill }: { rows: BillingRow[]; canBi
   async function run() {
     if (!canBill || runningRef.current || !selectedRows.length || selectedRows.length > 100) return;
     const orders = selectedRows.map(row => "#" + row.omie_order_number).join(", ");
-    if (!window.confirm(`Confirmar faturamento de ${selectedRows.length} pedido(s) no Omie?\n\nPedidos: ${orders}\n\nEsta operação poderá emitir NF-e real para todos os pedidos selecionados. Confira os dados comerciais e fiscais antes de continuar.`)) return;
+    if (!window.confirm(`Confirmar faturamento de ${selectedRows.length} pedido(s) no Omie?\n\nPedidos: ${orders}\n\nEsta operação poderá emitir NF-e real para todos os pedidos selecionados. Nos novos pedidos, o Omie também movimentará estoque e financeiro conforme o modelo 1107. Confira os dados comerciais e fiscais antes de continuar.`)) return;
     runningRef.current = true;
     stopRef.current = false;
     const ids = selectedRows.map(row => row.id);

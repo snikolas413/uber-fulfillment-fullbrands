@@ -10,6 +10,7 @@ import { prepareOrderAction } from "./actions";
 import type { OrderActionState } from "./actions";
 import { OmieActionButton } from "@/components/omie-action-button";
 import { ShippingEditor } from "@/app/expedicao/shipping-editor";
+import { ORDER_REFERENCE } from "@/lib/omie/order-reference";
 
 type Address = {
   id: string;
@@ -58,12 +59,8 @@ export type OrderDraft = {
 const orderInitialState: OrderActionState = { status: "idle", message: "" };
 
 const PRODUCT_REFERENCE = {
-  code: "R18",
-  name: "REMOTE BUTTON",
-  ncm: "8517.62.99",
-  cfop: "6.117",
-  unit: "PC",
-  defaultPrice: "107.97",
+  ...ORDER_REFERENCE,
+  defaultPrice: ORDER_REFERENCE.unitPrice.toFixed(2),
 };
 
 function latestAddress(recipient: OrderRecipient) {
@@ -301,12 +298,12 @@ function OrderDraftModal({
           <div className="recipient-form-section recipient-address-section"><strong>Item do pedido</strong><span>Produto consultado no cadastro Omie. O valor é uma referência editável e exige conferência antes da integração.</span></div>
           <div className="order-product-card">
             <span className="order-product-icon"><Package size={20} /></span>
-            <div><strong>{PRODUCT_REFERENCE.name}</strong><small>Código {PRODUCT_REFERENCE.code} · NCM {PRODUCT_REFERENCE.ncm} · Unidade {PRODUCT_REFERENCE.unit}</small><small>Cenário fiscal de referência: Venda para entrega futura · CFOP {PRODUCT_REFERENCE.cfop}</small></div>
+            <div><strong>{PRODUCT_REFERENCE.name}</strong><small>Código {PRODUCT_REFERENCE.code} · NCM {PRODUCT_REFERENCE.ncm} · Unidade {PRODUCT_REFERENCE.unit}</small><small>Parâmetros do pedido 1107 · Cenário {ORDER_REFERENCE.scenarioId} · CFOP {PRODUCT_REFERENCE.cfop}</small></div>
           </div>
           <div className="recipient-form-grid order-pricing-grid">
-            <label>Quantidade *<input name="quantity" type="number" required min={1} max={999} step={1} defaultValue={1} /></label>
-            <label>Valor unitário (R$) *<input name="unit_price" type="number" required min="0.01" max="999999.99" step="0.01" defaultValue={PRODUCT_REFERENCE.defaultPrice} /></label>
-            <label className="field-wide">Purchase Order Uber (opcional)<input name="customer_purchase_order" maxLength={30} placeholder="Ex.: 656083" /></label>
+            <label>Quantidade · pedido 1107<input name="quantity" type="number" readOnly value={1} /></label>
+            <label>Valor unitário (R$) · pedido 1107<input name="unit_price" type="number" readOnly value={PRODUCT_REFERENCE.defaultPrice} /></label>
+            <input name="customer_purchase_order" type="hidden" value="" />
           </div>
 
           <div className="recipient-form-note"><ShieldCheck size={15} /> O rascunho é salvo no Supabase com chave de idempotência e auditoria. Nenhuma operação é enviada ao Omie.</div>

@@ -40,6 +40,11 @@ function omie(options = {}) {
       }],
     } };
     if (method === 'ConsultarProduto') return { codigo_produto: params.codigo_produto, recomendacoes_fiscais: { origem_mercadoria: '1' } };
+    if (method === 'SimularImpostos') return { codigo_cliente: params.codigo_cliente, det_simul_resp: [{ codigo_cenario_impostos_item: 777,
+      produto_simul_resp: { ...params.det_simul[0].produto_simul }, imposto: options.simples ? {
+        icms_sn: { cod_sit_trib_icms_sn: '102', origem_icms_sn: '1', aliq_icms_sn: 0 },
+      } : { icms: options.emptySimulation ? {} : { cod_sit_trib_icms: '00', origem_icms: '1', modalidade_icms: '3', perc_red_base_icms: 0, aliq_icms: 4, base_icms: 126.03, valor_icms: 5.04 } },
+    }] };
     if (method === 'ListarImpostosCenario') return { ...params, impostos: { cst_icms: '00', modalidade_bc_icms: '3', reducao_bc_icms: 0, aliquota_icms: 4, perc_fcp_icms: 0, csosn: '102', aliquota_icms_simples: 0 } };
     if (method === 'AlterarPedidoVenda') { refreshed = true; return { codigo_status: options.refreshError ? '1' : '0', descricao_status: 'Atualização fiscal recusada' }; }
     if (method === 'TrocarEtapaPedido') return { codigo_status: options.stageError ? '1' : '0', descricao_status: 'Etapa não liberada' };
@@ -96,10 +101,10 @@ test('ICMS ausente reaplica o cenário já escolhido, preservando dados e endere
       produto: { codigo_produto: 987, quantidade: 1, valor_unitario: 107.97, codigo: 'R18' },
       inf_adic: { codigo_cenario_impostos_item: 777, nao_gerar_financeiro: 'S', nao_movimentar_estoque: 'S' },
       imposto: simples ? { icms_sn: { cod_sit_trib_icms_sn: '102', origem_icms_sn: '1', aliq_icms_sn: 0 } } : {
-        icms: { cod_sit_trib_icms: '00', origem_icms: '1', modalidade_icms: '3', perc_red_base_icms: 0, aliq_icms: 4, perc_fcp_icms: 0 },
+        icms: { cod_sit_trib_icms: '00', origem_icms: '1', modalidade_icms: '3', perc_red_base_icms: 0, aliq_icms: 4, base_icms: 126.03, valor_icms: 5.04 },
       },
     }] });
-    assert.ok(!('base_icms' in (refresh.params.det[0].imposto.icms ?? {})));
+    assert.equal(calls.find(call => call.method === 'SimularImpostos').params.uf_entrega, 'SC');
     assert.ok(!('informacoes_adicionais' in refresh.params));
     assert.equal(calls.filter(call => call.method === 'AlterarPedidoVenda').length, 1);
     assert.ok(calls.findIndex(call => call.method === 'AlterarPedidoVenda') < calls.findIndex(call => call.method === 'ValidarPedidoVenda'));
@@ -115,6 +120,14 @@ test('atualização fiscal sem CST, recusada ou com mudança de preço não soli
     assert.ok(!calls.some(call => ['ValidarPedidoVenda', 'FaturarPedidoVenda'].includes(call.method)));
     assert.deepEqual(states, ['billing_rejected']);
   }
+});
+
+test('não preenche impostos nem emite quando cenário não cobre a UF de entrega', async () => {
+  const { args, calls } = omie({ missingIcms: true, emptySimulation: true });
+  const result = await billing.invoiceExistingOrder(args);
+  assert.equal(result.outcome, 'rejected');
+  assert.match(result.message, /UF de entrega SC/);
+  assert.ok(!calls.some(call => ['AlterarPedidoVenda', 'TrocarEtapaPedido', 'FaturarPedidoVenda'].includes(call.method)));
 });
 
 test('bloqueia cancelamento, vínculo, frete, etapa, status fiscal e validação inválidos antes da emissão', async () => {
@@ -200,6 +213,7 @@ function actionHarness(options = {}) {
     'next/cache': { revalidatePath() {} }, '@/lib/supabase/server': { createSupabaseServerClient: async () => client },
     '@/lib/omie/freight-selection': freight, '@/lib/omie/invoice-order': billing,
     '@/lib/omie/item-icms': itemIcms,
+    '@/lib/omie/order-reference': loadModule('../src/lib/omie/order-reference.ts'),
     '@/lib/omie/client': { callOmie: upstream.args.request, OmieApiError: ApiError, OmieConfigurationError: ApiError },
   });
   return { actions, records, calls: upstream.calls };

@@ -6,10 +6,10 @@ A aplicação registra uma preparação local por destinatário, com endereço v
 ## Referências operacionais consultadas em 04/11/2026
 - Cliente Uber do Brasil Tecnologia Ltda., ID Omie `2867720329`.
 - Produto REMOTE BUTTON, código `R18`, ID Omie `2948561716`, unidade PC, NCM `8517.62.99`.
-- Preço de catálogo R$ 107,97; preço negociado anterior R$ 95,54. O app mantém o preço editável.
+- Padrão aprovado em 11/11/2026: pedido 1107, uma unidade a R$ 95,54, preço fixo e PO vazio.
 - Cenário de venda para entrega futura ID `2954399884`, CFOP de item observado `6.117`.
 - Novos pedidos recentes consultados usam etapa inicial `10`, parcela `000`, categoria `1.01.03`, conta corrente `2611948369`, consumidor final `S`.
-- Pedido recente de entrega futura usou flags `nao_movimentar_estoque = S` e `nao_gerar_financeiro = S`.
+- Novas inclusões seguem o pedido 1107: `nao_movimentar_estoque = N` e `nao_gerar_financeiro = N`; estoque 1579847408.
 
 Esses valores são referências reais do Omie consultadas para desenhar a integração. Antes do primeiro envio é necessária confirmação do responsável fiscal/comercial de que continuam aplicáveis à operação corrente.
 

@@ -5,7 +5,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { callOmie, OmieApiError, OmieConfigurationError } from "@/lib/omie/client";
 import { selectMiniEnviosFreight, resolveCorreiosCarrier, FreightSelectionError, isMiniEnviosName } from "@/lib/omie/freight-selection";
 import { invoiceExistingOrder, type BillingOutcome, type BillingControlState } from "@/lib/omie/invoice-order";
-import { resolveItemIcms, simulateOtherItemTaxes, ItemIcmsError } from "@/lib/omie/item-icms";
+import { simulateItemTaxes, ItemIcmsError } from "@/lib/omie/item-icms";
+import { ORDER_REFERENCE as reference } from "@/lib/omie/order-reference";
 
 export type OmieActionResult = { status: "success" | "error" | "warning"; message: string };
 type Recipient = { full_name: string; document_number: string | null; email: string | null; phone: string | null };
@@ -150,20 +151,20 @@ function validateOrder(row: Fulfillment) {
 }
 async function includeOrder(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, userId: string, row: Fulfillment, carrierId: number, itemTaxes: Record<string, unknown>): Promise<OmieActionResult> {
   const { recipient, address, item, email } = validateOrder(row);
-  const po = row.customer_purchase_order?.trim() ?? "";
   const city = address.city.trim().toLocaleUpperCase("pt-BR") + " (" + address.state.trim().toUpperCase() + ")";
   const result = await callOmie<OmieOrder>("/produtos/pedido/", "IncluirPedido", {
     cabecalho: {
       codigo_cliente: row.omie_customer_id ?? 2867720329,
       codigo_pedido_integracao: integrationCode(row.id),
-      data_previsao: todayInSaoPaulo(), etapa: "10", codigo_parcela: "000",
+      data_previsao: todayInSaoPaulo(), etapa: "10", codigo_parcela: "000", qtde_parcelas: 1, quantidade_itens: 1,
       ...(row.omie_tax_scenario_id ? { codigo_cenario_impostos: row.omie_tax_scenario_id } : {}),
     },
     frete: { codigo_transportadora: carrierId },
+    exportacao: { nao_exportacao: "N" },
     informacoes_adicionais: {
-      codigo_categoria: "1.01.03", codigo_conta_corrente: 2611948369,
-      numero_pedido_cliente: po || "", dados_adicionais_nf: po ? "Purchase Order #" + po + "|" : "",
-      consumidor_final: "S", utilizar_emails: email, enviar_email: "N",
+      codigo_categoria: reference.category, codigo_conta_corrente: reference.accountId,
+      numero_pedido_cliente: "", dados_adicionais_nf: "",
+      consumidor_final: "S", utilizar_emails: email, enviar_email: "N", enviar_pix: "N",
       outros_detalhes: {
         cNomeOd: recipient.full_name, cCnpjCpfOd: recipient.document_number ?? "",
         cEnderecoOd: address.street, cNumeroOd: address.number, cComplementoOd: address.complement ?? "",
@@ -172,17 +173,22 @@ async function includeOrder(supabase: Awaited<ReturnType<typeof createSupabaseSe
       },
     },
     det: [{
-      ide: { codigo_item_integracao: itemIntegrationCode(row.id) },
+      ide: { codigo_item_integracao: itemIntegrationCode(row.id), simples_nacional: "N" },
       imposto: itemTaxes,
       produto: {
-        codigo_produto: item.omie_product_id, codigo: item.product_code, descricao: item.description,
-        cfop: item.cfop ?? "6.117", ncm: item.ncm ?? "8517.62.99", unidade: item.unit,
+        codigo_produto: reference.productId, codigo: reference.code, descricao: reference.name,
+        cfop: reference.cfop, ncm: reference.ncm, unidade: reference.unit,
         quantidade: Number(item.quantity), valor_unitario: Number(item.unit_price),
+        codigo_tabela_preco: reference.priceTable, ean: reference.ean,
+        tipo_desconto: "P", percentual_desconto: 0, valor_desconto: 0, valor_deducao: 0,
+        valor_icms_desonerado: 0,
       },
       inf_adic: {
         ...(row.omie_tax_scenario_id ? { codigo_cenario_impostos_item: row.omie_tax_scenario_id } : {}),
-        ...(po ? { numero_pedido_compra: po.slice(0, 15) } : {}),
-        nao_movimentar_estoque: "S", nao_gerar_financeiro: "S",
+        numero_pedido_compra: "", item_pedido_compra: 0,
+        codigo_categoria_item: reference.category, codigo_local_estoque: reference.warehouseId,
+        nao_movimentar_estoque: "N", nao_gerar_financeiro: "N", nao_somar_total: "N",
+        dados_adicionais_item: "", peso_bruto: 0, peso_liquido: 0,
       },
     }],
   });
@@ -199,7 +205,7 @@ async function includeOrder(supabase: Awaited<ReturnType<typeof createSupabaseSe
   if (error) return { status: "warning", message: "O Omie recebeu o pedido, mas não foi possível atualizar o registro local. Use a sincronização para reconciliar." };
   await audit(supabase, userId, row.id, "omie.order.created", {
     omie_order_id: orderId, omie_order_number: orderNumber, integration_code: integrationCode(row.id),
-    email_present: Boolean(email), shipping_in_omie: true,
+    email_present: Boolean(email), shipping_in_omie: true, reference_order: reference.number,
   });
   revalidatePath("/pedidos"); revalidatePath("/faturamento"); revalidatePath("/");
   const selected = await applyMiniEnviosFreight(supabase, userId, { ...row, status: "order_created", omie_order_id: orderId, omie_order_number: orderNumber });
@@ -294,8 +300,11 @@ export async function sendOrderToOmieAction(id: string, confirmRetry = false): P
     const { address, item } = validateOrder(row);
     const scenarioId = Number(row.omie_tax_scenario_id);
     const customerId = row.omie_customer_id ?? 2867720329;
-    const itemIcms = await resolveItemIcms(callOmie, { scenarioId, customerId, productId: item.omie_product_id, finalConsumer: "S" });
-    const otherTaxes = await simulateOtherItemTaxes(callOmie, { scenarioId, customerId, productId: item.omie_product_id,
+    if (row.fulfillment_items?.length !== 1 || customerId !== reference.customerId || scenarioId !== reference.scenarioId ||
+      item.omie_product_id !== reference.productId || Number(item.quantity) !== reference.quantity || Number(item.unit_price) !== reference.unitPrice || row.customer_purchase_order?.trim()) {
+      throw new ItemIcmsError("Prepare novamente este pedido com os parâmetros da referência 1107: uma unidade de R18 a R$ 95,54, sem pedido de compra.");
+    }
+    const otherTaxes = await simulateItemTaxes(callOmie, { scenarioId, customerId, productId: item.omie_product_id,
       quantity: Number(item.quantity), unitPrice: Number(item.unit_price), deliveryState: address.state });
     if (row.status === "ready") {
       const { data: lock, error } = await supabase.from("fulfillments").update({
@@ -312,7 +321,7 @@ export async function sendOrderToOmieAction(id: string, confirmRetry = false): P
     }
 
     try {
-      return await includeOrder(supabase, userId, row, carrierId, { ...otherTaxes, ...itemIcms });
+      return await includeOrder(supabase, userId, row, carrierId, otherTaxes);
     } catch (error) {
       const message = errorMessage(error);
       await supabase.from("fulfillments").update({

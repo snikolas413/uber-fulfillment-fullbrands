@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { ORDER_REFERENCE } from "@/lib/omie/order-reference";
 
 export type OrderActionState = {
   status: "idle" | "success" | "error";
@@ -44,14 +45,8 @@ export async function prepareOrderAction(
     if (!uuidPattern.test(idempotencyKey)) {
       return { status: "error", message: "A sessão do formulário expirou. Feche e abra a preparação novamente." };
     }
-    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 999) {
-      return { status: "error", message: "A quantidade deve ser um número inteiro entre 1 e 999." };
-    }
-    if (!Number.isFinite(unitPrice) || unitPrice <= 0 || unitPrice > 999999.99) {
-      return { status: "error", message: "Informe um valor unitário maior que zero." };
-    }
-    if (purchaseOrder.length > 30) {
-      return { status: "error", message: "A referência do pedido de compra aceita até 30 caracteres." };
+    if (quantity !== ORDER_REFERENCE.quantity || unitPrice !== ORDER_REFERENCE.unitPrice || purchaseOrder) {
+      return { status: "error", message: "Use os parâmetros do pedido 1107: uma unidade a R$ 95,54 e pedido de compra vazio." };
     }
     if (customerEmail.length > 160 || (customerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail))) {
       return { status: "error", message: "Informe um e-mail válido para o envio da NF-e." };
