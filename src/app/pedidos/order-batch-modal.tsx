@@ -35,8 +35,9 @@ export function OrderBatchModal({ recipients: initialRecipients, onClose, onSave
     if (visibleEligible.every(recipient => selected.includes(recipient.id))) {
       setSelected(current => current.filter(id => !visibleEligible.some(recipient => recipient.id === id)));
     } else {
-      setSelected(current => [...new Set([...current, ...visibleEligible.map(recipient => recipient.id)])].slice(0, 100));
-      if (visibleEligible.length + selected.length > 100) setMessage("Seleção limitada a 100 destinatários por lote.");
+      const next = [...new Set([...selected, ...visibleEligible.map(recipient => recipient.id)])];
+      setSelected(next.slice(0, 100));
+      if (next.length > 100) setMessage("Seleção limitada a 100 destinatários por lote.");
     }
   }
 
@@ -84,7 +85,7 @@ export function OrderBatchModal({ recipients: initialRecipients, onClose, onSave
             const locked = running || attempted.includes(recipient.id);
             const addresses = [...recipient.delivery_addresses].sort((a, b) => b.created_at.localeCompare(a.created_at));
             return <article className="order-batch-row" key={recipient.id}>
-              <label className="order-batch-person"><input type="checkbox" aria-label={`Selecionar ${recipient.full_name}`} checked={selected.includes(recipient.id)} disabled={running || !eligible(recipient.id) || (!selected.includes(recipient.id) && selected.length >= 100)} onChange={event => setSelected(current => event.target.checked ? [...current, recipient.id] : current.filter(id => id !== recipient.id))} /><span><strong>{recipient.full_name}</strong><small>{recipient.document_number || "CPF não informado"}</small></span></label>
+              <label className="order-batch-person"><input type="checkbox" aria-label={`Selecionar ${recipient.full_name}`} checked={selected.includes(recipient.id)} disabled={running || result?.status === "success" || (!selected.includes(recipient.id) && (!eligible(recipient.id) || selected.length >= 100))} onChange={event => setSelected(current => event.target.checked ? [...current, recipient.id] : current.filter(id => id !== recipient.id))} /><span><strong>{recipient.full_name}</strong><small>{recipient.document_number || "CPF não informado"}</small></span></label>
               <label>Endereço de entrega<select aria-label={`Endereço de ${recipient.full_name}`} value={choice.addressId} disabled={locked} onChange={event => setChoices(current => ({ ...current, [recipient.id]: { ...choice, addressId: event.target.value } }))}>
                 {!choice.addressId && <option value="">Nenhum endereço disponível</option>}
                 {addresses.map(address => <option key={address.id} value={address.id} disabled={address.validation_status === "invalid"}>{address.street}, {address.number}{address.complement ? " · " + address.complement : ""} · {address.district} · {address.city}/{address.state} · {address.postal_code}{address.validation_status === "invalid" ? " · Inválido" : address.validation_status !== "valid" ? " · Pendente de validação" : ""}</option>)}
