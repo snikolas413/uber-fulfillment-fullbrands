@@ -64,6 +64,16 @@ export async function prepareOrderAction(
 
     if (error) {
       if (error.code === "23505") {
+        const { data: existing, error: readError } = await supabase.from("fulfillments")
+          .select("id")
+          .eq("idempotency_key", idempotencyKey).eq("created_by", authData.user.id)
+          .eq("recipient_id", recipientId).eq("delivery_address_id", deliveryAddressId)
+          .maybeSingle();
+        if (!readError && existing) {
+          revalidatePath("/pedidos");
+          revalidatePath("/");
+          return { status: "success", message: "Preparação já registrada neste lote. Nenhum pedido duplicado foi criado." };
+        }
         return { status: "error", message: "Esta preparação já foi registrada. Atualize a página para conferir o pedido." };
       }
       if (error.code === "PGRST202" || error.message.includes("prepare_uber_fulfillment")) {

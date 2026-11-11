@@ -3,6 +3,26 @@
 ## Fluxo
 A aplicação registra uma preparação local por destinatário, com endereço versionado, PO, item, quantidade, preço e e-mail para NF-e. Ao clicar em **Enviar ao Omie**, é criado um pedido de venda real no ERP, mantendo Uber como cliente e o motorista como destino físico.
 
+## Preparação em massa
+Em **Preparar pedido**, busque destinatários e marque de 1 a 100 por lote.
+**Selecionar visíveis** respeita a busca e o limite do lote. Cada linha mantém seu
+próprio endereço e e-mail, que podem ser conferidos antes de iniciar. O endereço
+mais recente que não está inválido é selecionado inicialmente; endereços pendentes
+são aceitos. Destinatários sem endereço disponível ou sem e-mail válido precisam
+ser corrigidos antes de selecionar.
+
+**Preparar N pedido(s)** cria uma preparação por destinatário, sequencialmente,
+pelos parâmetros do pedido 1107 (uma unidade de R18, R$ 95,54, PO vazio).
+A janela permanece aberta com o resultado de cada linha e contagem de sucessos
+e erros. Uma falha não impede os outros registros. Pedidos concluídos não são
+reenviados ao repetir o botão; a chave de cada tentativa é conservada nesta janela
+para recuperar uma resposta perdida sem duplicar a preparação. Após iniciar uma
+linha, seus dados ficam bloqueados para que uma repetição use o mesmo conteúdo.
+Mantenha a janela aberta até o lote terminar. Fechar e iniciar outro lote é uma
+nova solicitação de pedidos, inclusive para destinatários já usados anteriormente.
+O lote não envia pedidos ao Omie nem solicita faturamento; essas etapas permanecem
+separadas. Não é necessária alteração no esquema do banco.
+
 ## Referências operacionais consultadas em 04/11/2026
 - Cliente Uber do Brasil Tecnologia Ltda., ID Omie `2867720329`.
 - Produto REMOTE BUTTON, código `R18`, ID Omie `2948561716`, unidade PC, NCM `8517.62.99`.

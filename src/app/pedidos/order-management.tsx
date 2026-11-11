@@ -1,16 +1,14 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus, ClipboardList, Search, MapPin, Package, Clock3, FileText,
-  ShieldCheck, X, LoaderCircle, AlertCircle, ChevronRight
+  AlertCircle
 } from "lucide-react";
-import { prepareOrderAction } from "./actions";
-import type { OrderActionState } from "./actions";
+import { OrderBatchModal } from "./order-batch-modal";
 import { OmieActionButton } from "@/components/omie-action-button";
 import { ShippingEditor } from "@/app/expedicao/shipping-editor";
-import { ORDER_REFERENCE } from "@/lib/omie/order-reference";
 
 type Address = {
   id: string;
@@ -56,19 +54,6 @@ export type OrderDraft = {
   fulfillment_items: OrderItem[];
 };
 
-const orderInitialState: OrderActionState = { status: "idle", message: "" };
-
-const PRODUCT_REFERENCE = {
-  ...ORDER_REFERENCE,
-  defaultPrice: ORDER_REFERENCE.unitPrice.toFixed(2),
-};
-
-function latestAddress(recipient: OrderRecipient) {
-  return [...(recipient.delivery_addresses ?? [])].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-  )[0];
-}
-
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
 }
@@ -76,13 +61,6 @@ function formatCurrency(value: number) {
 function formatDate(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "Data indisponível" : new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(date);
-}
-
-function addressText(address: Address | null | undefined) {
-  if (!address) return "Endereço não cadastrado";
-  const street = [address.street, address.number].filter(Boolean).join(", ");
-  const extra = [address.complement, address.district].filter(Boolean).join(" · ");
-  return [street, extra, `${address.city}/${address.state}`, address.postal_code].filter(Boolean).join(" · ");
 }
 
 function statusLabel(status: string) {
@@ -214,106 +192,13 @@ export function OrderManagement({
       </section>
 
       {modalKey && (
-        <OrderDraftModal
+        <OrderBatchModal
           key={modalKey}
-          idempotencyKey={modalKey}
-          recipients={readyRecipients}
+          recipients={recipients}
           onClose={closeModal}
-          onSaved={() => { closeModal(); router.refresh(); }}
+          onSaved={() => { router.refresh(); }}
         />
       )}
-    </div>
-  );
-}
-
-function OrderDraftModal({
-  idempotencyKey,
-  recipients,
-  onClose,
-  onSaved,
-}: {
-  idempotencyKey: string;
-  recipients: OrderRecipient[];
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [state, formAction, pending] = useActionState(prepareOrderAction, orderInitialState);
-  const firstRecipient = recipients[0];
-  const [recipientId, setRecipientId] = useState(firstRecipient?.id ?? "");
-  const selectedRecipient = recipients.find((recipient) => recipient.id === recipientId) ?? null;
-  const addresses = selectedRecipient?.delivery_addresses ?? [];
-  const [addressId, setAddressId] = useState(latestAddress(firstRecipient ?? { id: "", full_name: "", document_number: null, email: null, delivery_addresses: [] })?.id ?? "");
-  const [customerEmail, setCustomerEmail] = useState(firstRecipient?.email ?? "");
-
-  const orderedAddresses = useMemo(() => [...addresses].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-  ), [addresses]);
-  const selectedAddress = orderedAddresses.find((address) => address.id === addressId) ?? orderedAddresses[0] ?? null;
-
-  useEffect(() => {
-    if (state.status === "success") onSaved();
-  }, [state.status, onSaved]);
-
-  function changeRecipient(nextId: string) {
-    setRecipientId(nextId);
-    const recipient = recipients.find((item) => item.id === nextId);
-    setAddressId(latestAddress(recipient ?? { id: "", full_name: "", document_number: null, email: null, delivery_addresses: [] })?.id ?? "");
-    setCustomerEmail(recipient?.email ?? "");
-  }
-
-  return (
-    <div className="recipient-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className="recipient-modal order-modal" role="dialog" aria-modal="true" aria-labelledby="order-modal-title">
-        <div className="recipient-modal-header">
-          <div><span className="section-kicker">NOVO PEDIDO LOCAL</span><h2 id="order-modal-title">Preparar pedido de venda</h2><p>Um pedido por destinatário, com endereço vinculado à expedição.</p></div>
-          <button type="button" className="icon-action" onClick={onClose} aria-label="Fechar"><X size={18} /></button>
-        </div>
-        <form action={formAction} className="recipient-form">
-          <input type="hidden" name="idempotency_key" value={idempotencyKey} />
-
-          <div className="recipient-form-section"><strong>Destinatário e entrega</strong><span>O cliente do ERP será Uber do Brasil. O motorista fica como destinatário físico da entrega.</span></div>
-          <div className="recipient-form-grid">
-            <label className="field-wide">Motorista / destinatário *
-              <select name="recipient_id" required value={recipientId} onChange={(event) => changeRecipient(event.target.value)}>
-                {recipients.map((recipient) => <option key={recipient.id} value={recipient.id}>{recipient.full_name}</option>)}
-              </select>
-            </label>
-            <label className="field-wide">Endereço para esta entrega *
-              <select name="delivery_address_id" required value={selectedAddress?.id ?? ""} onChange={(event) => setAddressId(event.target.value)}>
-                {orderedAddresses.map((address) => <option key={address.id} value={address.id}>{addressText(address)}</option>)}
-              </select>
-            </label>
-          </div>
-          {selectedAddress && (
-            <div className={`order-address-preview order-address-preview-${selectedAddress.validation_status}`}>
-              <MapPin size={15} />
-              <div><strong>{selectedAddress.validation_status === "valid" ? "Endereço validado" : selectedAddress.validation_status === "invalid" ? "Endereço inválido" : selectedAddress.validation_status === "manual_review" ? "Endereço em revisão manual" : "Endereço pendente de validação"}</strong><small>{addressText(selectedAddress)}</small></div>
-            </div>
-          )}
-
-          <div className="recipient-form-section recipient-address-section"><strong>E-mail para o cliente</strong><span>O endereço será preenchido na aba “E-mail para o Cliente” do pedido Omie para receber a NF-e. O envio automático de e-mail permanece desativado.</span></div>
-          <div className="recipient-form-grid">
-            <label className="field-wide">E-mail para o cliente (NF-e)<input name="customer_email" type="email" autoComplete="email" maxLength={160} value={customerEmail} onChange={(event) => setCustomerEmail(event.target.value)} placeholder="E-mail cadastrado no destinatário" /></label>
-          </div>
-          <div className="recipient-form-section recipient-address-section"><strong>Item do pedido</strong><span>Produto consultado no cadastro Omie. O valor é uma referência editável e exige conferência antes da integração.</span></div>
-          <div className="order-product-card">
-            <span className="order-product-icon"><Package size={20} /></span>
-            <div><strong>{PRODUCT_REFERENCE.name}</strong><small>Código {PRODUCT_REFERENCE.code} · NCM {PRODUCT_REFERENCE.ncm} · Unidade {PRODUCT_REFERENCE.unit}</small><small>Parâmetros do pedido 1107 · Cenário {ORDER_REFERENCE.scenarioId} · CFOP {PRODUCT_REFERENCE.cfop}</small></div>
-          </div>
-          <div className="recipient-form-grid order-pricing-grid">
-            <label>Quantidade · pedido 1107<input name="quantity" type="number" readOnly value={1} /></label>
-            <label>Valor unitário (R$) · pedido 1107<input name="unit_price" type="number" readOnly value={PRODUCT_REFERENCE.defaultPrice} /></label>
-            <input name="customer_purchase_order" type="hidden" value="" />
-          </div>
-
-          <div className="recipient-form-note"><ShieldCheck size={15} /> O rascunho é salvo no Supabase com chave de idempotência e auditoria. Nenhuma operação é enviada ao Omie.</div>
-          {state.status === "error" && <div className="recipient-alert recipient-alert-error">{state.message}</div>}
-          <div className="recipient-form-actions">
-            <button type="button" className="recipient-cancel" onClick={onClose} disabled={pending}>Cancelar</button>
-            <button type="submit" className="primary-button" disabled={pending || !selectedAddress}>{pending ? <><LoaderCircle className="auth-spinner" size={15} /> Salvando...</> : <><Plus size={15} /> Salvar preparação</>}</button>
-          </div>
-        </form>
-      </section>
     </div>
   );
 }
