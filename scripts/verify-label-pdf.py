@@ -7,7 +7,8 @@ from reportlab.graphics.barcode.code128 import _patterns
 
 pdf_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('outputs/labels/demonstracao-etiqueta-100x150.pdf')
 reader = PdfReader(pdf_path)
-page = reader.pages[0]
+page_index = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+page = reader.pages[page_index]
 assert abs(float(page.mediabox.width) - 100 * 72 / 25.4) < .001
 assert abs(float(page.mediabox.height) - 150 * 72 / 25.4) < .001
 text = page.extract_text()
@@ -16,8 +17,8 @@ if len(sys.argv) == 1:
     assert 'SEM VALOR POSTAL' in text
 key = ''.join(text.strip().splitlines()[-1].split())
 assert len(key) == 44 and key.isdigit()
-image = pypdfium2.PdfDocument(pdf_path)[0].render(scale=3).to_pil().convert('RGB')
-image.save(pdf_path.with_suffix('.png'))
+image = pypdfium2.PdfDocument(pdf_path)[page_index].render(scale=3).to_pil().convert('RGB')
+image.save(pdf_path.with_name(pdf_path.stem + (f'-pagina-{page_index + 1}' if len(reader.pages) > 1 else '') + '.png'))
 # Read the actual rendered bars, independently of the JavaScript barcode encoder.
 y = round((150 - 13.5) * 72 / 25.4 * 3)
 pixels = [sum(image.getpixel((x, y))) < 384 for x in range(image.width)]

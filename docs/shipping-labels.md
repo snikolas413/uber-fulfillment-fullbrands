@@ -19,6 +19,31 @@ modifica documentos fiscais no Omie.
 5. **Abrir etiqueta 100 × 150** abre o PDF salvo. Use a impressão do visualizador
    em escala 100%. Reimprimir não chama a operação de geração do Omie.
 
+## Etiquetas em massa
+
+Marque até 100 pedidos na Expedição, individualmente ou pela caixa do cabeçalho
+(respeita a busca por nome, NF-e e rastreio). **Preparar etiquetas selecionadas**
+processa um pedido por vez e mostra o resultado por linha. Etiquetas já prontas
+são reutilizadas, sem nova operação no Omie. Tentativas com estado `processing`
+ou `unknown` ficam fora da seleção. Uma falha não impede os demais pedidos.
+**Parar após o pedido atual** interrompe antes de iniciar o próximo.
+
+Ao concluir, **Abrir PDF do lote** disponibiliza um único PDF com os pedidos
+confirmados, na ordem da seleção apresentada pela fila, incluindo todos os volumes.
+A tela informa quantos pedidos selecionados foram incluídos e que os pedidos com
+erro ou não processados ficaram fora do arquivo. Cada página continua com
+100 × 150 mm e com o bloco fiscal da respectiva nota. O limite do arquivo é
+20 MB e 200 páginas; seleções maiores precisam ser divididas. A página deve ficar
+aberta durante a preparação. Se somente a montagem do PDF falhar, é possível
+repeti-la sem gerar etiquetas outra vez.
+
+O endpoint POST `/api/expedicao/etiquetas` apenas lê arquivos já salvos, exige
+sessão ativa, verifica a origem da requisição e reconfere cada pedido, caminho,
+NF-e e estado da etiqueta por RLS. Um vínculo inconsistente bloqueia o PDF inteiro.
+O arquivo combinado é temporário no navegador e não fica em bucket público.
+As etiquetas individuais permanecem salvas para reimpressão. O perfil consulta
+mantém acesso à impressão individual, sem controles de geração de lote.
+
 Não há `GerarFrete`, nova cotação, postagem, emissão ou alteração da NF-e nesse
 fluxo. A encomenda deve ter sido criada pelo faturamento e pela integração Omie
 com os Correios. Falhas dessa integração são apresentadas ao operador.
