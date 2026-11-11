@@ -1,5 +1,4 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +15,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const { data: invoice } = await db.from("invoices").select("access_key,status").eq("fulfillment_id", id).maybeSingle();
   const { data: order } = await db.from("fulfillments").select("status").eq("id", id).maybeSingle();
   if (!order || order.status === "cancelled" || !invoice || invoice.access_key !== shipment.label_invoice_key || invoice.status !== "006") return new Response("Confira a situação fiscal do pedido antes de imprimir.", { status: 409 });
-  const { data, error } = await createSupabaseAdminClient().storage.from("shipping-labels").download(shipment.label_storage_path);
+  const { data, error } = await db.storage.from("shipping-labels").download(shipment.label_storage_path);
   if (error || !data) return new Response("Arquivo da etiqueta indisponível.", { status: 404 });
   return new Response(await data.arrayBuffer(), { headers: {
     "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="etiqueta-${id}.pdf"`,

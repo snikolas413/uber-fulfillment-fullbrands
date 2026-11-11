@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { callOmie } from "@/lib/omie/client";
 import { readShippingInvoice } from "@/lib/omie/shipping-invoice";
 import { downloadOmieLabel } from "@/lib/omie/label-download";
@@ -54,7 +53,7 @@ export async function generateShippingLabelAction(id: string, confirmed = false)
       markUnknown: () => update({ label_generation_state: "unknown" }),
       markRejected: () => update({ label_generation_state: "none" }),
     });
-    const bucket = createSupabaseAdminClient().storage.from("shipping-labels");
+    const bucket = db.storage.from("shipping-labels");
     const prefix = id + "/" + invoice.key;
     const pdfs = [];
     for (const [index, source] of sources.entries()) {

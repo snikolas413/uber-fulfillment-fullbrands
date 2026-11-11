@@ -174,10 +174,11 @@ test('fluxo completo salva original e PDF combinado, confirma NF local e reimpri
     async download(path) { return { data: blobs.has(path) ? new Blob([blobs.get(path)]) : null }; },
     async upload(path, bytes) { blobs.set(path, bytes); return { error: null }; },
   };
+  db.storage = { from(name) { assert.equal(name, 'shipping-labels'); return bucket; } };
   const source = await sampleLabel();
   const actions = load('../src/app/expedicao/label-actions.ts', {
     'next/cache': { revalidatePath() {} }, '@/lib/supabase/server': { createSupabaseServerClient: async () => db },
-    '@/lib/supabase/admin': { createSupabaseAdminClient: () => ({ storage: { from: () => bucket } }) },
+    '@/lib/supabase/admin': { createSupabaseAdminClient() { assert.fail('Expedição deve usar a sessão do operador, sem chave administrativa'); } },
     '@/lib/omie/client': { async callOmie(endpoint, method) { operations.push(method); assert.equal(method, 'GerarEtiqueta'); return { cCodStatus: '0', listaEtiqueta: [{ cUrlEtiqueta: 'https://cdn.omie.com.br/label.pdf' }] }; } },
     '@/lib/omie/shipping-invoice': { readShippingInvoice: async () => invoice },
     '@/lib/omie/label-download': { downloadOmieLabel: async () => source }, '@/lib/omie/shipping-label-pdf': pdf,
@@ -191,4 +192,29 @@ test('fluxo completo salva original e PDF combinado, confirma NF local e reimpri
   assert.equal(blobs.size, 2);
   assert.equal((await actions.generateShippingLabelAction(id, true)).status, 'success');
   assert.deepEqual(operations, ['GerarEtiqueta']);
+});
+
+test('download usa Storage autenticado e exige sessão, NF consistente e caminho do pedido', async () => {
+  for (const options of [{}, { loggedOut: true }, { wrongKey: true }, { cancelled: true }]) {
+    let downloads = 0;
+    const id = '11111111-1111-4111-8111-111111111111';
+    const db = {
+      auth: { getUser: async () => ({ data: { user: options.loggedOut ? null : { id: 'user' } } }) },
+      from(table) {
+        const values = {
+          user_profiles: { is_active: true },
+          shipments: { label_storage_path: `${id}/${key}/etiqueta-nfe-v1.pdf`, label_invoice_key: key, label_generation_state: 'ready' },
+          invoices: { access_key: options.wrongKey ? 'other' : key, status: '006' },
+          fulfillments: { status: options.cancelled ? 'cancelled' : 'label_ready' },
+        };
+        return { select() { return this; }, eq() { return this; }, maybeSingle: async () => ({ data: values[table] }) };
+      },
+      storage: { from(name) { assert.equal(name, 'shipping-labels'); return { async download() { downloads++; return { data: new Blob(['%PDF-demo']) }; } }; } },
+    };
+    const route = load('../src/app/api/expedicao/[id]/etiqueta/route.ts', { '@/lib/supabase/server': { createSupabaseServerClient: async () => db } });
+    const response = await route.GET(new Request('https://example.test/label'), { params: Promise.resolve({ id }) });
+    assert.equal(response.status, options.loggedOut ? 401 : options.wrongKey || options.cancelled ? 409 : 200);
+    assert.equal(downloads, response.status === 200 ? 1 : 0);
+    if (response.status === 200) assert.equal(response.headers.get('cache-control'), 'private, no-store');
+  }
 });

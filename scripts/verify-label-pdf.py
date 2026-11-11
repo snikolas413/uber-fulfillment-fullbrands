@@ -1,16 +1,19 @@
 """Independent render/text/barcode check of the demonstration PDF (no ERP calls)."""
 from pathlib import Path
+import sys
 import pypdfium2
 from pypdf import PdfReader
 from reportlab.graphics.barcode.code128 import _patterns
 
-pdf_path = Path('outputs/labels/demonstracao-etiqueta-100x150.pdf')
+pdf_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('outputs/labels/demonstracao-etiqueta-100x150.pdf')
 reader = PdfReader(pdf_path)
 page = reader.pages[0]
 assert abs(float(page.mediabox.width) - 100 * 72 / 25.4) < .001
 assert abs(float(page.mediabox.height) - 150 * 72 / 25.4) < .001
 text = page.extract_text()
-assert 'SEM VALOR POSTAL' in text and 'DANFE SIMPLIFICADA' in text
+assert 'DANFE SIMPLIFICADA' in text
+if len(sys.argv) == 1:
+    assert 'SEM VALOR POSTAL' in text
 key = ''.join(text.strip().splitlines()[-1].split())
 assert len(key) == 44 and key.isdigit()
 image = pypdfium2.PdfDocument(pdf_path)[0].render(scale=3).to_pil().convert('RGB')

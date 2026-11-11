@@ -49,8 +49,13 @@ com os Correios. Falhas dessa integração são apresentadas ao operador.
 - Sincronizar frete preserva o serviço dos Correios selecionado; o código interno
   `codigo_tipo_entrega` do Omie não substitui o código do serviço Mini Envios.
 
-Migration: `20261111162254_shipping_labels.sql`. A geração não altera RLS de
-tabelas existentes. Storage é acessado somente pelo backend após autorização.
+Migrations: `20261111162254_shipping_labels.sql` e
+`20261111165333_authenticated_shipping_label_storage.sql`. O backend usa a sessão
+do operador para ler/gravar PDFs; não exige `SUPABASE_SERVICE_ROLE_KEY` na expedição.
+RLS permite ler arquivos somente com perfil ativo e caminho correspondente a um
+pedido não cancelado e à chave de sua etiqueta. Apenas admin/gestor/operador podem
+inserir ou atualizar; consulta pode ler. Não há permissão de exclusão nem acesso
+anônimo. Nenhuma política de outras tabelas é alterada.
 
 ## Validação
 
@@ -62,6 +67,11 @@ conferindo o CODE128 e seu checksum. A demonstração contém dados fictícios e
 marcada sem valor postal. Não representa uma geração real validada nos Correios.
 O primeiro teste do operador precisa confirmar o PDF original real devolvido pelo
 Omie, o layout final e a leitura na impressora térmica, antes da postagem.
+
+Na correção do armazenamento autenticado, foi baixado o PDF já gerado do pedido
+1146, sem nova solicitação de etiqueta, e montado o arquivo com a NF-e 1243. O
+original individual (aproximadamente 105 × 130 mm) é compatível com a composição
+em 100 × 150 mm. O layout real foi renderizado e conferido.
 
 ## Fontes oficiais consultadas
 
