@@ -411,7 +411,8 @@ export async function syncOmieShippingAction(id: string): Promise<OmieActionResu
     const { error: shipmentError } = await supabase.from("shipments").upsert({
       fulfillment_id: row.id,
       carrier_id: freight.codigo_transportadora ? String(freight.codigo_transportadora) : null,
-      service_code: freight.codigo_tipo_entrega ? String(freight.codigo_tipo_entrega) : null,
+      // codigo_tipo_entrega is an Omie internal delivery type, not the Correios service.
+      // Preserve the Mini Envios service recorded by SelecionarFrete.
       tracking_code: tracking, tracking_url: trackingUrl, estimated_delivery_date: eta,
       package_count: freight.quantidade_volumes ?? null, service_modality: freight.modalidade ?? null,
       freight_amount: freight.valor_frete ?? null, status: tracking ? "label_ready" : "shipping_pending",
@@ -431,7 +432,7 @@ export async function syncOmieShippingAction(id: string): Promise<OmieActionResu
     });
     revalidatePath("/expedicao"); revalidatePath("/pedidos"); revalidatePath("/");
     return tracking
-      ? { status: "success", message: "Rastreio e frete atualizados a partir do Omie. A etiqueta continua no fluxo do próprio ERP." }
+      ? { status: "success", message: "Rastreio e frete atualizados a partir do Omie. A etiqueta pode ser preparada na tela Expedição." }
       : { status: "success", message: "Frete sincronizado do Omie. O código de rastreio ainda não foi registrado no ERP." };
   } catch (error) {
     return { status: "error", message: errorMessage(error) };

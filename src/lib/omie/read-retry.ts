@@ -1,5 +1,5 @@
 // Only repeat reads after Omie's explicit REDUNDANT cooldown. Never repeat writes.
-const readMethods = new Set(["ConsultarPedido", "ConsultarCliente", "ListarClientes", "StatusPedido", "ConsultarProduto", "ListarImpostosCenario", "SimularImpostos"]);
+const readMethods = new Set(["ConsultarPedido", "ConsultarCliente", "ListarClientes", "StatusPedido", "ConsultarProduto", "ListarImpostosCenario", "SimularImpostos", "ConsultarNF", "ObterRastreio"]);
 
 export async function withRedundantReadRetry<T>(
   method: string,

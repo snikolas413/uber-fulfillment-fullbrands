@@ -9,3 +9,5 @@ build/
 *.tsbuildinfo
 .DS_Store
 coverage/
+outputs/
+supabase/.temp/
