@@ -37,6 +37,17 @@ Esses valores são referências reais do Omie consultadas para desenhar a integr
 O e-mail do destinatário é carregado na preparação, pode ser ajustado para o pedido e fica guardado como snapshot. No Omie, é enviado para `informacoes_adicionais.utilizar_emails`, que preenche a aba **E-mail para o Cliente**. `enviar_email` permanece `N`; a aplicação não dispara documentos por e-mail automaticamente.
 
 ## Envio seguro ao Omie
+Na tabela **Pedidos preparados**, marque pedidos com status **Rascunho preparado**
+e sem código Omie. A caixa do cabeçalho marca os pedidos elegíveis visíveis na
+busca. **Enviar selecionados ao Omie** envia até 100 por lote, com uma confirmação
+para o conjunto. Cada pedido passa pela mesma ação do envio individual, incluindo
+impostos e seleção automática de Correios + Mini Envios grátis. Não há faturamento.
+O processamento é sequencial, mostra resultado em cada linha e continua após erros.
+**Parar após o pedido atual** evita iniciar os próximos, sem cancelar o que já foi enviado.
+Mantenha a página aberta. Uma resposta perdida não é repetida automaticamente e
+o lote nunca autoriza reinclusão: use **Atualizar Omie** e o fluxo individual para
+conferir pendências. Enquanto o lote roda, os botões individuais ficam desativados.
+
 O envio usa código de integração determinístico por pedido local. Antes de uma nova inclusão, pedidos pendentes são consultados por esse código para evitar duplicidade. Timeout é tratado como resultado desconhecido e exige reconciliação; não há repetição automática. A inclusão guarda o ID e número retornados pelo Omie.
 
 ## Faturamento e expedição

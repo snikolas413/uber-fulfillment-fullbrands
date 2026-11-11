@@ -34,10 +34,12 @@ export function OmieActionButton({
   fulfillmentId,
   kind,
   size = "normal",
+  disabled = false,
 }: {
   fulfillmentId: string;
   kind: ActionKind;
   size?: "normal" | "small";
+  disabled?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -45,6 +47,7 @@ export function OmieActionButton({
   const Icon = icons[kind];
 
   function run() {
+    if (disabled || pending) return;
     if (kind === "send") {
       const accepted = window.confirm(
         "Esta ação criará o pedido no Omie e selecionará Mini Envios com frete grátis para o cliente automaticamente. O motorista será o destino físico. A etapa do pedido será mantida, sem faturamento ou e-mail automático. Continuar?"
@@ -96,7 +99,7 @@ export function OmieActionButton({
         type="button"
         className={`omie-action-button ${size === "small" ? "omie-action-button-small" : ""}`}
         onClick={run}
-        disabled={pending}
+        disabled={pending || disabled}
       >
         {pending ? <LoaderCircle className="auth-spinner" size={13} /> : <Icon size={13} />}
         {pending ? (kind === "send" ? "Criando pedido e preparando frete..." : "Processando...") : labels[kind]}

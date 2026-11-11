@@ -1,14 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus, ClipboardList, Search, MapPin, Package, Clock3, FileText,
-  AlertCircle
+  AlertCircle, Send, LoaderCircle
 } from "lucide-react";
 import { OrderBatchModal } from "./order-batch-modal";
 import { OmieActionButton } from "@/components/omie-action-button";
 import { ShippingEditor } from "@/app/expedicao/shipping-editor";
+import { sendOrderToOmieAction } from "./omie-actions";
+import { canSendPreparedOrder, runOrderSendBatch, type SendResult } from "@/lib/omie/order-send-batch";
 
 type Address = {
   id: string;
@@ -93,6 +95,15 @@ export function OrderManagement({
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [modalKey, setModalKey] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [sendResults, setSendResults] = useState<Record<string, SendResult>>({});
+  const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
+  const stopRef = useRef(false);
+  const [stopping, setStopping] = useState(false);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [batchTotal, setBatchTotal] = useState(0);
+  const [batchDone, setBatchDone] = useState(0);
 
   const readyRecipients = recipients.filter((recipient) =>
     (recipient.delivery_addresses ?? []).some((address) => address.validation_status !== "invalid"),
@@ -112,6 +123,38 @@ export function OrderManagement({
     ].join(" ").toLocaleLowerCase("pt-BR").includes(term));
   }, [drafts, search]);
 
+  const eligible = (draft: OrderDraft) => canSendPreparedOrder(draft) && !sendResults[draft.id];
+  const visibleEligible = visibleDrafts.filter(eligible);
+  const selectedOrders = drafts.filter(draft => selected.includes(draft.id) && eligible(draft));
+  const allVisibleSelected = visibleEligible.length > 0 && visibleEligible.every(draft => selected.includes(draft.id));
+
+  function toggleVisible() {
+    if (allVisibleSelected) setSelected(current => current.filter(id => !visibleEligible.some(draft => draft.id === id)));
+    else setSelected(current => [...new Set([...current, ...visibleEligible.map(draft => draft.id)])].slice(0, 100));
+  }
+
+  async function sendSelected() {
+    if (!canWrite || sendingRef.current || !selectedOrders.length || selectedOrders.length > 100) return;
+    if (!window.confirm(`Enviar ${selectedOrders.length} pedido(s) selecionado(s) ao Omie? Cada pedido será criado com Correios + Mini Envios grátis. O faturamento continua em uma etapa separada.`)) return;
+    const ids = selectedOrders.map(draft => draft.id);
+    sendingRef.current = true; stopRef.current = false;
+    setSending(true); setStopping(false); setBatchTotal(ids.length); setBatchDone(0);
+    try {
+      await runOrderSendBatch(ids, {
+        send: sendOrderToOmieAction, shouldStop: () => stopRef.current,
+        onStart: setActiveId,
+        onResult(id, result) {
+          setSendResults(current => ({ ...current, [id]: result }));
+          setSelected(current => current.filter(value => value !== id));
+          setBatchDone(current => current + 1);
+        },
+      });
+    } finally {
+      sendingRef.current = false; setSending(false); setStopping(false); setActiveId(null);
+      router.refresh();
+    }
+  }
+
   const openNewDraft = () => setModalKey(crypto.randomUUID());
   const closeModal = () => setModalKey(null);
 
@@ -123,7 +166,7 @@ export function OrderManagement({
           <h1>Pedidos</h1>
           <p className="page-lead">Prepare um pedido por destinatário, confira os dados e deixe tudo pronto para integração com o Omie.</p>
         </div>
-        {canWrite && <button type="button" className="primary-button" onClick={openNewDraft}><Plus size={17} /> Preparar pedido</button>}
+        {canWrite && <button type="button" className="primary-button" disabled={sending} onClick={openNewDraft}><Plus size={17} /> Preparar pedido</button>}
       </section>
 
       <section className="orders-notice">
@@ -145,16 +188,23 @@ export function OrderManagement({
           <div><span className="section-kicker">FILA OPERACIONAL</span><h2>Pedidos preparados</h2></div>
           <label className="recipient-search"><Search size={16} /><input aria-label="Buscar pedidos" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por motorista, PO ou código" /></label>
         </div>
+        {canWrite && <div className="order-send-toolbar">
+          <span>{selectedOrders.length} pedido(s) selecionado(s) · Até 100 por lote</span>
+          <button type="button" className="primary-button" disabled={sending || !selectedOrders.length} onClick={sendSelected}>{sending ? <LoaderCircle size={16} className="auth-spinner" /> : <Send size={16} />} {sending ? "Enviando ao Omie..." : "Enviar selecionados ao Omie"}</button>
+          {sending && <button type="button" className="secondary-button" disabled={stopping} onClick={() => { stopRef.current = true; setStopping(true); }}>{stopping ? "Concluindo pedido atual..." : "Parar após o pedido atual"}</button>}
+        </div>}
+        {batchTotal > 0 && <div role="status" aria-live="polite" className="order-send-progress">{sending ? "Processando" : "Lote encerrado"}: {batchDone} de {batchTotal} pedido(s). {sending ? "Mantenha esta página aberta." : "Confira o resultado em cada linha."}</div>}
         {loadError && <div className="recipient-alert recipient-alert-error">{loadError}</div>}
         {visibleDrafts.length ? (
           <div className="orders-table-wrap">
             <table className="orders-table">
-              <thead><tr><th>DESTINATÁRIO</th><th>PRODUTO</th><th>REFERÊNCIA</th><th>ENDEREÇO</th><th>E-MAIL NF-E</th><th>TOTAL</th><th>STATUS</th><th>CRIADO EM</th><th>OMIE / FRETE</th></tr></thead>
+              <thead><tr>{canWrite && <th><input type="checkbox" aria-label="Selecionar pedidos preparados visíveis" checked={allVisibleSelected} disabled={sending || !visibleEligible.length} onChange={toggleVisible} /></th>}<th>DESTINATÁRIO</th><th>PRODUTO</th><th>REFERÊNCIA</th><th>ENDEREÇO</th><th>E-MAIL NF-E</th><th>TOTAL</th><th>STATUS</th><th>CRIADO EM</th><th>OMIE / FRETE</th></tr></thead>
               <tbody>
                 {visibleDrafts.map((draft) => {
                   const item = draft.fulfillment_items?.[0];
                   return (
                     <tr key={draft.id}>
+                      {canWrite && <td><input type="checkbox" aria-label={`Selecionar pedido de ${draft.recipients?.full_name ?? draft.id}`} checked={selected.includes(draft.id)} disabled={sending || !eligible(draft) || (!selected.includes(draft.id) && selectedOrders.length >= 100)} onChange={event => setSelected(current => event.target.checked ? [...current, draft.id] : current.filter(id => id !== draft.id))} /></td>}
                       <td><strong>{draft.recipients?.full_name ?? "Destinatário indisponível"}</strong><small>{draft.omie_order_number ? `Omie #${draft.omie_order_number}` : "Ainda sem número Omie"}</small></td>
                       <td><strong>{item?.description ?? "Produto não informado"}</strong><small>{item?.product_code ?? "Sem código"} · {item?.quantity ?? 0} un.</small></td>
                       <td>{draft.customer_purchase_order || "Não informada"}</td>
@@ -164,9 +214,11 @@ export function OrderManagement({
                       <td><span className={`order-status order-status-${draft.status}`}>{statusLabel(draft.status)}</span></td>
                       <td><span className="orders-date"><Clock3 size={12} />{formatDate(draft.created_at)}</span></td>
                       <td>
-                        {canWrite && ["ready", "order_pending", "error"].includes(draft.status) && <OmieActionButton fulfillmentId={draft.id} kind="send" size="small" />}
-                        {canWrite && ["order_created", "billing_pending", "billed"].includes(draft.status) && <OmieActionButton fulfillmentId={draft.id} kind="sync-order" size="small" />}
-                        {canWrite && draft.omie_order_id && ["order_created", "billing_pending"].includes(draft.status) && <>
+                        {activeId === draft.id && <small role="status">Criando pedido e selecionando Mini Envios...</small>}
+                        {sendResults[draft.id] && <small role="status" className={`omie-action-result omie-action-result-${sendResults[draft.id].status}`}>{sendResults[draft.id].message}</small>}
+                        {canWrite && !sendResults[draft.id] && ["ready", "order_pending", "error"].includes(draft.status) && <OmieActionButton disabled={sending} fulfillmentId={draft.id} kind="send" size="small" />}
+                        {canWrite && (["order_created", "billing_pending", "billed"].includes(draft.status) || sendResults[draft.id]) && <OmieActionButton disabled={sending} fulfillmentId={draft.id} kind="sync-order" size="small" />}
+                        {canWrite && !sending && draft.omie_order_id && ["order_created", "billing_pending"].includes(draft.status) && <>
                           {draft.omie_last_error?.startsWith("Frete: ") && <OmieActionButton fulfillmentId={draft.id} kind="select-mini" size="small" />}
                           <ShippingEditor fulfillmentId={draft.id} current={(() => { const shipment = Array.isArray(draft.shipments) ? draft.shipments[0] : draft.shipments; return { carrierId: shipment?.carrier_id && /^\d+$/.test(shipment.carrier_id) ? Number(shipment.carrier_id) : null, packageCount: shipment?.package_count, freightAmount: shipment?.freight_amount, deliveryForecast: shipment?.estimated_delivery_date, modality: shipment?.service_modality }; })()} />
                         </>}
