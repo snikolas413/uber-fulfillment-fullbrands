@@ -20,7 +20,8 @@ export default async function OrdersPage() {
   const [recipientResult, fulfillmentResult] = await Promise.all([
     supabase
       .from("recipients")
-      .select("id, full_name, document_number, email, delivery_addresses(id, postal_code, street, number, complement, district, city, state, validation_status, created_at)")
+      .select("id, full_name, document_number, email, used_orders:fulfillments(), delivery_addresses(id, postal_code, street, number, complement, district, city, state, validation_status, created_at)")
+      .is("used_orders", null)
       .order("full_name", { ascending: true })
       .order("created_at", { ascending: false, referencedTable: "delivery_addresses" }),
     supabase

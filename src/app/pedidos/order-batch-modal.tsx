@@ -25,7 +25,7 @@ export function OrderBatchModal({ recipients: initialRecipients, onClose, onSave
   const [attempted, setAttempted] = useState<string[]>([]);
   const [message, setMessage] = useState("");
   const term = search.trim().toLocaleLowerCase("pt-BR");
-  const visible = recipients.filter(recipient => [recipient.full_name, recipient.document_number ?? "", recipient.email ?? ""].join(" ").toLocaleLowerCase("pt-BR").includes(term));
+  const visible = recipients.filter(recipient => results[recipient.id]?.status !== "success" && [recipient.full_name, recipient.document_number ?? "", recipient.email ?? ""].join(" ").toLocaleLowerCase("pt-BR").includes(term));
   const eligible = (id: string) => Boolean(choices[id]?.addressId && emailValid(choices[id].email) && results[id]?.status !== "success");
   const visibleEligible = visible.filter(recipient => eligible(recipient.id));
   const pending = selected.filter(id => results[id]?.status !== "success");
@@ -73,7 +73,7 @@ export function OrderBatchModal({ recipients: initialRecipients, onClose, onSave
       </div>
       <div className="recipient-form">
         <div className="order-product-card"><Package size={22} /><div><strong>{ORDER_REFERENCE.name} · {ORDER_REFERENCE.quantity} {ORDER_REFERENCE.unit} por pedido</strong><small>R$ 95,54 por unidade · Parâmetros do pedido 1107 · Pedido de compra vazio</small></div></div>
-        <p className="order-batch-help">Confira o endereço e o e-mail de cada destinatário. Endereços pendentes de validação são aceitos; endereços inválidos não podem ser usados.</p>
+        <p className="order-batch-help">São exibidos apenas destinatários que ainda não foram usados em pedidos. Confira o endereço e o e-mail de cada destinatário. Endereços pendentes de validação são aceitos; endereços inválidos não podem ser usados.</p>
         <div className="order-batch-toolbar">
           <label className="recipient-search"><Search size={16} /><input aria-label="Buscar destinatários" placeholder="Buscar por nome, CPF ou e-mail" value={search} disabled={running} onChange={event => setSearch(event.target.value)} /></label>
           <button type="button" className="secondary-button" disabled={running || !visibleEligible.length} onClick={selectVisible}>{visibleEligible.length > 0 && visibleEligible.every(recipient => selected.includes(recipient.id)) ? "Desmarcar visíveis" : "Selecionar visíveis"}</button>
@@ -95,7 +95,7 @@ export function OrderBatchModal({ recipients: initialRecipients, onClose, onSave
               {result && <small role="status" className={`order-batch-result omie-action-result-${result.status}`}>{result.message}</small>}
             </article>;
           })}
-          {!visible.length && <p>Nenhum destinatário encontrado.</p>}
+          {!visible.length && <p>{search.trim() ? "Nenhum destinatário encontrado." : "Nenhum destinatário disponível para preparar em massa."}</p>}
         </div>
         <div role="status" aria-live="polite" className="order-batch-summary">{selected.length} selecionado(s) · {successes} preparado(s) · {Object.values(results).filter(result => result.status === "error").length} com erro{running && " · Processando: mantenha esta janela aberta."}</div>
         {message && <div className="recipient-alert recipient-alert-error">{message}</div>}

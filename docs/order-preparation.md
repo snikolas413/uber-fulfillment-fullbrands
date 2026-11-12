@@ -5,6 +5,8 @@ A aplicação registra uma preparação local por destinatário, com endereço v
 
 ## Preparação em massa
 Em **Preparar pedido**, busque destinatários e marque de 1 a 100 por lote.
+Somente destinatários sem preparação anterior aparecem na seleção. O filtro
+considera todo o histórico e qualquer status de pedido, inclusive cancelado.
 **Selecionar visíveis** respeita a busca e o limite do lote. Cada linha mantém seu
 próprio endereço e e-mail, que podem ser conferidos antes de iniciar. O endereço
 mais recente que não está inválido é selecionado inicialmente; endereços pendentes
@@ -18,8 +20,9 @@ e erros. Uma falha não impede os outros registros. Pedidos concluídos não sã
 reenviados ao repetir o botão; a chave de cada tentativa é conservada nesta janela
 para recuperar uma resposta perdida sem duplicar a preparação. Após iniciar uma
 linha, seus dados ficam bloqueados para que uma repetição use o mesmo conteúdo.
-Mantenha a janela aberta até o lote terminar. Fechar e iniciar outro lote é uma
-nova solicitação de pedidos, inclusive para destinatários já usados anteriormente.
+Mantenha a janela aberta até o lote terminar. Destinatários preparados com sucesso
+saem da seleção durante o lote; a contagem de sucessos é preservada. Ao fechar,
+reabrir ou atualizar a página, destinatários já usados continuam fora da seleção.
 O lote não envia pedidos ao Omie nem solicita faturamento; essas etapas permanecem
 separadas. Não é necessária alteração no esquema do banco.
 

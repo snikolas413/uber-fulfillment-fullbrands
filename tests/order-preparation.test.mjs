@@ -127,3 +127,34 @@ test('janela exibe vários destinatários com endereço e e-mail individuais sem
   assert.match(html, /Cadastre um endereço/);
   assert.match(html, /Preparar 0 pedido/);
 });
+
+test('destinatário preparado sai da seleção do lote, mas falhas continuam disponíveis para repetir', () => {
+  let stateIndex = 0;
+  const { OrderBatchModal } = loadModule('../src/app/pedidos/order-batch-modal.tsx', {
+    react: { ...React, useState(initial) {
+      const state = React.useState(initial);
+      const index = stateIndex++;
+      if (index === 2) return [[recipientId, 'failed'], () => {}];
+      if (index === 4) return [{
+        [recipientId]: { status: 'success', message: 'Preparado' },
+        failed: { status: 'error', message: 'Falha temporária' },
+      }, () => {}];
+      return state;
+    } },
+    'react/jsx-runtime': jsxRuntime, 'lucide-react': icons,
+    './actions': { prepareOrderAction() { assert.fail('Renderizar não deve criar pedidos'); } },
+    '@/lib/omie/order-reference': reference,
+    '@/lib/order-preparation': { defaultDeliveryAddress, runPreparationBatch },
+  });
+  const html = renderToStaticMarkup(React.createElement(OrderBatchModal, {
+    recipients: [
+      { id: recipientId, full_name: 'Já preparado', email: 'a@example.com', delivery_addresses: [] },
+      { id: 'failed', full_name: 'Tentar novamente', email: 'b@example.com', delivery_addresses: [] },
+    ], onClose() {}, onSaved() {},
+  }));
+  assert.doesNotMatch(html, /Selecionar Já preparado/);
+  assert.match(html, /Selecionar Tentar novamente/);
+  assert.match(html, /Falha temporária/);
+  assert.match(html, /1 preparado/);
+  assert.match(html, /Preparar 1 pedido/);
+});
