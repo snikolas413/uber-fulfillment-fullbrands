@@ -238,5 +238,9 @@
 .billing-table input[type=checkbox]{width:16px;height:16px;accent-color:#667d38;cursor:pointer}
 .billing-table input[type=checkbox]:disabled{cursor:not-allowed;opacity:.45}
 .billing-row-active{background:#f8faef}
+.order-list-filters{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.order-list-filters select{max-width:100%;padding:10px 12px;border:1px solid #dfe4e4;border-radius:8px;background:#fff;color:#364143;font:inherit;font-size:12px}
+.order-list-pagination{display:flex;align-items:center;gap:12px;flex-wrap:wrap;color:#596367}
+@media(max-width:760px){.order-list-filters{width:100%}.order-list-filters .recipient-search{flex:1 1 100%}.order-list-filters select{flex:1}.order-list-pagination{justify-content:space-between}}
 .billing-table .omie-action-result{min-width:180px;margin-bottom:7px}
 @media(max-width:760px){.omie-action-wrap{max-width:180px}.omie-action-button{white-space:normal;text-align:left}}

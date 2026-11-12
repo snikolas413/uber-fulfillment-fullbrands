@@ -1,10 +1,11 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { OrderManagement, type OrderDraft, type OrderRecipient } from "./order-management";
+import { loadOrderList, orderListParams } from "@/lib/order-list";
 
 export const dynamic = "force-dynamic";
 
-export default async function OrdersPage() {
+export default async function OrdersPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const supabase = await createSupabaseServerClient();
   const { data: authData, error: authError } = await supabase.auth.getUser();
   if (authError || !authData.user) redirect("/login");
@@ -24,11 +25,7 @@ export default async function OrdersPage() {
       .is("used_orders", null)
       .order("full_name", { ascending: true })
       .order("created_at", { ascending: false, referencedTable: "delivery_addresses" }),
-    supabase
-      .from("fulfillments")
-      .select("id, status, omie_order_id, omie_order_number, omie_last_error, customer_purchase_order, customer_email, created_at, recipients(full_name, email), delivery_addresses(city, state, postal_code), fulfillment_items(product_code, description, quantity, unit_price, line_total), shipments(carrier_id, package_count, freight_amount, estimated_delivery_date, service_modality)")
-      .order("created_at", { ascending: false })
-      .limit(100),
+    loadOrderList(supabase, orderListParams(await searchParams)),
   ]);
 
   const recipients = (recipientResult.data ?? []) as unknown as OrderRecipient[];
@@ -39,6 +36,8 @@ export default async function OrdersPage() {
     <OrderManagement
       recipients={recipients}
       drafts={drafts}
+      list={fulfillmentResult.state}
+      key={`${fulfillmentResult.state.view}:${fulfillmentResult.state.search}:${fulfillmentResult.state.page}`}
       canWrite={canWrite}
       loadError={recipientResult.error || fulfillmentResult.error ? "Não foi possível carregar todos os dados. Atualize a página e confira a conexão." : null}
     />

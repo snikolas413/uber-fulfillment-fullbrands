@@ -63,11 +63,17 @@ test('lista mostra seleção e botão de lote só para escrita; abrir página n�
     '@/app/expedicao/shipping-editor': { ShippingEditor: () => null },
     './omie-actions': { sendOrderToOmieAction() { assert.fail('Renderização não pode enviar'); } },
     '@/lib/omie/order-send-batch': batch,
+    '@/lib/order-list': { ORDER_PAGE_SIZE: 100 },
   });
   const drafts = ['ready', 'order_pending', 'billed'].map((status, i) => ({ id: String(i), status, omie_order_id: status === 'billed' ? 123 : null, created_at: '2026-11-11', recipients: { full_name: 'Pessoa ' + i }, fulfillment_items: [] }));
-  const render = canWrite => renderToStaticMarkup(React.createElement(OrderManagement, { drafts, recipients: [], canWrite }));
+  const list = { view: 'pending', search: '', page: 1, pageCount: 2, count: 174, totals: { all: 174, pending: 174, sent: 0, review: 0, cancelled: 0 } };
+  const render = canWrite => renderToStaticMarkup(React.createElement(OrderManagement, { drafts, recipients: [], canWrite, list }));
   const writable = render(true);
   assert.match(writable, /Enviar selecionados ao Omie/);
+  assert.match(writable, /Página 1 de 2/);
+  assert.match(writable, /100 de 174 pedido/);
+  assert.match(writable, /Aguardando envio \(174\)/);
+  assert.match(writable, /Enviados ao Omie \(0\)/);
   assert.match(writable, /aria-label="Selecionar pedido de Pessoa 0"[^>]*\/?>/);
   assert.match(writable, /aria-label="Selecionar pedido de Pessoa 1"[^>]*disabled/);
   assert.match(writable, /aria-label="Selecionar pedido de Pessoa 2"[^>]*disabled/);

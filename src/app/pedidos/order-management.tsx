@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Plus, ClipboardList, Search, MapPin, Package, Clock3, FileText,
+  Plus, ClipboardList, Search, MapPin, Package, Clock3, CheckCircle,
   AlertCircle, Send, LoaderCircle
 } from "lucide-react";
 import { OrderBatchModal } from "./order-batch-modal";
@@ -11,6 +11,11 @@ import { OmieActionButton } from "@/components/omie-action-button";
 import { ShippingEditor } from "@/app/expedicao/shipping-editor";
 import { sendOrderToOmieAction } from "./omie-actions";
 import { canSendPreparedOrder, runOrderSendBatch, type SendResult } from "@/lib/omie/order-send-batch";
+import { ORDER_PAGE_SIZE, type OrderListState, type OrderView } from "@/lib/order-list";
+
+const viewLabels: Record<OrderView, string> = {
+  pending: "Aguardando envio", sent: "Enviados ao Omie", review: "Revisar", cancelled: "Cancelados sem envio", all: "Todos",
+};
 
 type Address = {
   id: string;
@@ -84,16 +89,17 @@ function statusLabel(status: string) {
 export function OrderManagement({
   recipients,
   drafts,
+  list,
   canWrite,
   loadError,
 }: {
   recipients: OrderRecipient[];
   drafts: OrderDraft[];
+  list: OrderListState;
   canWrite: boolean;
   loadError?: string | null;
 }) {
   const router = useRouter();
-  const [search, setSearch] = useState("");
   const [modalKey, setModalKey] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [sendResults, setSendResults] = useState<Record<string, SendResult>>({});
@@ -108,20 +114,10 @@ export function OrderManagement({
   const readyRecipients = recipients.filter((recipient) =>
     (recipient.delivery_addresses ?? []).some((address) => address.validation_status !== "invalid"),
   );
-  const totalDraftValue = drafts.reduce(
-    (sum, draft) => sum + (draft.fulfillment_items ?? []).reduce((lineSum, item) => lineSum + Number(item.line_total ?? Number(item.quantity) * Number(item.unit_price)), 0),
-    0,
-  );
-  const visibleDrafts = useMemo(() => {
-    const term = search.trim().toLocaleLowerCase("pt-BR");
-    if (!term) return drafts;
-    return drafts.filter((draft) => [
-      draft.recipients?.full_name ?? "",
-      draft.omie_order_number ?? "",
-      draft.customer_purchase_order ?? "",
-      draft.fulfillment_items?.[0]?.product_code ?? "",
-    ].join(" ").toLocaleLowerCase("pt-BR").includes(term));
-  }, [drafts, search]);
+  const visibleDrafts = drafts;
+  function pageUrl(page: number) {
+    return `/pedidos?${new URLSearchParams({ view: list.view, q: list.search, page: String(page) })}`;
+  }
 
   const eligible = (draft: OrderDraft) => canSendPreparedOrder(draft) && !sendResults[draft.id];
   const visibleEligible = visibleDrafts.filter(eligible);
@@ -178,15 +174,21 @@ export function OrderManagement({
       </section>
 
       <section className="orders-stats">
-        <article className="recipient-stat"><span className="recipient-stat-icon"><ClipboardList size={17} /></span><div><strong>{drafts.length}</strong><small>Preparações registradas</small></div></article>
-        <article className="recipient-stat"><span className="recipient-stat-icon"><Package size={17} /></span><div><strong>{drafts.filter((draft) => draft.status === "ready").length}</strong><small>Aguardando integração Omie</small></div></article>
-        <article className="recipient-stat"><span className="recipient-stat-icon"><FileText size={17} /></span><div><strong>{formatCurrency(totalDraftValue)}</strong><small>Valor total das preparações</small></div></article>
+        <article className="recipient-stat"><span className="recipient-stat-icon"><ClipboardList size={17} /></span><div><strong>{list.totals.all}</strong><small>Preparações registradas</small></div></article>
+        <article className="recipient-stat"><span className="recipient-stat-icon"><Package size={17} /></span><div><strong>{list.totals.pending}</strong><small>Aguardando envio ao Omie</small></div></article>
+        <article className="recipient-stat"><span className="recipient-stat-icon"><CheckCircle size={17} /></span><div><strong>{list.totals.sent}</strong><small>Enviados ao Omie</small></div></article>
       </section>
 
       <section className="panel orders-panel">
         <div className="recipient-toolbar">
           <div><span className="section-kicker">FILA OPERACIONAL</span><h2>Pedidos preparados</h2></div>
-          <label className="recipient-search"><Search size={16} /><input aria-label="Buscar pedidos" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por motorista, PO ou código" /></label>
+          <form action="/pedidos" method="get" className="order-list-filters">
+            <select name="view" aria-label="Filtrar pedidos" defaultValue={list.view} disabled={sending} onChange={event => event.currentTarget.form?.requestSubmit()}>
+              {(Object.keys(viewLabels) as OrderView[]).map(view => <option key={view} value={view}>{viewLabels[view]} ({list.totals[view]})</option>)}
+            </select>
+            <label className="recipient-search"><Search size={16} /><input name="q" aria-label="Buscar pedidos" defaultValue={list.search} disabled={sending} placeholder="Nome, nº Omie, PO, e-mail ou código" /></label>
+            <button className="secondary-button" type="submit" disabled={sending}>Buscar</button>
+          </form>
         </div>
         {canWrite && <div className="order-send-toolbar">
           <span>{selectedOrders.length} pedido(s) selecionado(s) · Até 100 por lote</span>
@@ -234,13 +236,19 @@ export function OrderManagement({
         ) : (
           <div className="recipient-empty">
             <span className="recipient-empty-icon"><ClipboardList size={24} /></span>
-            <strong>{search ? "Nenhum pedido encontrado" : "Nenhum pedido preparado ainda"}</strong>
-            <p>{search ? "Revise a busca ou tente outro termo." : "Selecione um destinatário cadastrado para preparar o primeiro pedido."}</p>
-            {!search && canWrite && <button type="button" className="secondary-button" onClick={openNewDraft} disabled={!readyRecipients.length}><Plus size={15} /> Preparar primeiro pedido</button>}
-            {!search && !readyRecipients.length && <small className="orders-empty-hint">Cadastre um destinatário com endereço antes de avançar.</small>}
+            <strong>Nenhum pedido encontrado</strong>
+            <p>{list.search ? "Revise a busca ou tente outro termo." : `Nenhum pedido em “${viewLabels[list.view]}”. Escolha outro filtro para consultar o histórico.`}</p>
+            {!list.totals.all && canWrite && <button type="button" className="secondary-button" onClick={openNewDraft} disabled={!readyRecipients.length}><Plus size={15} /> Preparar primeiro pedido</button>}
           </div>
         )}
-        <div className="recipient-table-footer"><span>{visibleDrafts.length} de {drafts.length} preparação(ões)</span><span>O envio cria um pedido real no Omie. O faturamento exige confirmação separada.</span></div>
+        <div className="recipient-table-footer">
+          <span>{list.count ? (list.page - 1) * ORDER_PAGE_SIZE + 1 : 0}–{Math.min(list.page * ORDER_PAGE_SIZE, list.count)} de {list.count} pedido(s) · {viewLabels[list.view]}</span>
+          <nav aria-label="Páginas de pedidos" className="order-list-pagination">
+            <button type="button" className="secondary-button" disabled={sending || list.page <= 1} onClick={() => router.push(pageUrl(list.page - 1))}>Anterior</button>
+            <span>Página {list.page} de {list.pageCount}</span>
+            <button type="button" className="secondary-button" disabled={sending || list.page >= list.pageCount} onClick={() => router.push(pageUrl(list.page + 1))}>Próxima</button>
+          </nav>
+        </div>
       </section>
 
       {modalKey && (

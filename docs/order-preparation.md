@@ -26,6 +26,22 @@ reabrir ou atualizar a página, destinatários já usados continuam fora da sele
 O lote não envia pedidos ao Omie nem solicita faturamento; essas etapas permanecem
 separadas. Não é necessária alteração no esquema do banco.
 
+## Controle dos pedidos e envio ao Omie
+
+A tela abre em **Aguardando envio**, com pedidos preparados ainda sem vínculo no
+Omie. **Enviados ao Omie** reúne pedidos com ID Omie confirmado, inclusive os que
+avançaram para faturamento ou expedição. **Revisar** reúne tentativas pendentes ou
+com erro e sem ID Omie: confira usando **Atualizar Omie** antes de reenviar.
+**Cancelados sem envio** e **Todos** permitem consultar o restante do histórico.
+
+Os indicadores mostram os totais do banco, independentemente da página e da busca.
+A lista tem páginas de 100 pedidos, com navegação **Anterior/Próxima** e contagem
+dos resultados. A busca por destinatário, número Omie, PO, e-mail ou código do
+produto consulta todo o filtro escolhido, incluindo pedidos fora da página atual.
+Mudar o filtro ou buscar reinicia a paginação e a seleção. O envio continua limitado
+a 100 pedidos por lote, com resultado por linha; navegar e buscar não enviam pedidos.
+Os controles de navegação e busca ficam bloqueados durante o envio.
+
 ## Referências operacionais consultadas em 04/11/2026
 - Cliente Uber do Brasil Tecnologia Ltda., ID Omie `2867720329`.
 - Produto REMOTE BUTTON, código `R18`, ID Omie `2948561716`, unidade PC, NCM `8517.62.99`.
