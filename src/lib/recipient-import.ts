@@ -102,7 +102,8 @@ export function rowsFromCells(cells: unknown[][]): ImportRow[] {
     // keeping numbered street names such as Rua 25 de Março intact.
     const match = address.match(/^(.+?)[,\s]+(\d+[A-Za-z]?|s\/?n)(?:[,\s]+((?:casa|apto?|apartamento|bloco|fundos|sala|lote|quadra|complemento)\b.*))?$/i);
     const explicitNumber = get("numero");
-    rows.push({ line: index + 2, cpf: digitsOnly(get("cpf")), full_name: get("full_name"),
+    const cpf = digitsOnly(get("cpf"));
+    rows.push({ line: index + 2, cpf: cpf.length === 10 ? "0" + cpf : cpf, full_name: get("full_name"),
       phone_number: digitsOnly(get("phone_number")), email: get("email").toLowerCase(),
       endereco: explicitNumber ? address : match?.[1].replace(/,$/, "") ?? address,
       numero: explicitNumber || match?.[2] || "", complemento: get("complemento") || (!explicitNumber ? match?.[3] ?? "" : ""),

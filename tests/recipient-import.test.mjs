@@ -27,6 +27,28 @@ test('CSV aceita BOM, ponto e vírgula, aspas escapadas e células multilinha', 
   assert.throws(() => parseDelimited('a;b\n"ab;c'), /aspas abertas/);
 });
 
+test('importação completa CPF de 10 dígitos antes de validar e cadastrar', async () => {
+  const { action, saved } = actionWithDatabase();
+  for (const cpf of ['1234567890', 1234567890, '123.456.789-0']) {
+    const [row] = rowsFromCells([IMPORT_COLUMNS, [cpf, ...values.slice(1)]]);
+    assert.equal(row.cpf, '01234567890');
+    assert.deepEqual(validateImportRow(row), []);
+  }
+  const csv = [IMPORT_COLUMNS.join(';'), ['1234567890', ...values.slice(1)].join(';')].join('\n');
+  const [row] = rowsFromCells(parseDelimited(csv));
+  const results = await action([row, { ...row, line: 3, cpf: values[0] }]);
+  assert.deepEqual(results.map(result => result.status), ['created', 'skipped']);
+  assert.equal(saved[0].p_document_number, '01234567890');
+});
+
+test('importação preserva CPF de 11 dígitos e rejeita outros tamanhos sem completar', () => {
+  for (const cpf of ['', '123456789', '123456789012', '12345678901234', '01234567890', '12345678901']) {
+    const [row] = rowsFromCells([IMPORT_COLUMNS, [cpf, ...values.slice(1)]]);
+    assert.equal(row.cpf, cpf);
+    assert.equal(validateImportRow(row).some(error => error.startsWith('CPF')), cpf.length !== 11);
+  }
+});
+
 test('cabeçalhos acentuados são aceitos; faltas, repetições e excesso de linhas são rejeitados', () => {
   assert.equal(rowsFromCells([IMPORT_COLUMNS.map(key => key === 'endereco' ? 'Endereço' : key === 'codigo_postal' ? 'Código Postal' : key), values]).length, 1);
   assert.throws(() => rowsFromCells([['cpf'], ['123']]), /ausentes/);

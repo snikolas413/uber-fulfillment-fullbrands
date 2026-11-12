@@ -11,7 +11,7 @@ Na tela Destinatários, use **Importar arquivo**, selecione o arquivo, revise a 
 - O modelo para download tem exatamente essas nove colunas, nessa ordem. Informe rua, número e complemento juntos em `endereco`, como `Rua Afonso 13 casa 2`.
 - Acentos e espaços nos cabeçalhos são normalizados: `endereço` e `código postal` são aceitos.
 - Colunas opcionais: `numero`, `complemento`. Quando `numero` está preenchido, `endereco` é usado como logradouro, sem separação automática.
-- Formate CPF, telefone e CEP como **texto** no Excel. Zeros que já foram perdidos no arquivo não são inventados pelo importador.
+- Formate CPF, telefone e CEP como **texto** no Excel. Na leitura do arquivo, CPFs com exatamente 10 dígitos recebem um zero à esquerda para completar os 11 dígitos, inclusive quando a célula do Excel é numérica. A correção aparece na prévia antes da validação e da verificação de duplicidades. CPFs com outros tamanhos não são completados; telefone e CEP mantêm o tratamento atual.
 
 ## Revisão e gravação
 
