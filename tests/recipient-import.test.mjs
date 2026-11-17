@@ -4,10 +4,17 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { readSheet } from 'read-excel-file/node';
 import { zipSync, strToU8 } from 'fflate';
+import * as React from 'react';
+import * as jsxRuntime from 'react/jsx-runtime';
+import * as icons from 'lucide-react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 const source = readFileSync(new URL('../src/lib/recipient-import.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
-const { IMPORT_COLUMNS, parseDelimited, rowsFromCells, validateImportRow, buildImportReport, importReportCsv } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
+const importTools = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));
+const { IMPORT_COLUMNS, MAX_IMPORT_ROWS, parseDelimited, rowsFromCells, validateImportRow, buildImportReport, importReportCsv, normalizeImportRow } = importTools;
+const addressTools = {};
+new Function('require','exports',ts.transpileModule(readFileSync(new URL('../src/lib/import-address.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(() => importTools,addressTools);
 const values = ['01234567890', 'Teste Full', '551198765280', 'testefull@gmail.com', 'Rua Afonso 13 casa 2', 'Pinheiros', 'São Paulo', 'SP', '05426200'];
 
 test('estrutura do exemplo separa rua, número e complemento e preserva zeros', () => {
@@ -53,7 +60,8 @@ test('cabeçalhos acentuados são aceitos; faltas, repetições e excesso de lin
   assert.equal(rowsFromCells([IMPORT_COLUMNS.map(key => key === 'endereco' ? 'Endereço' : key === 'codigo_postal' ? 'Código Postal' : key), values]).length, 1);
   assert.throws(() => rowsFromCells([['cpf'], ['123']]), /ausentes/);
   assert.throws(() => rowsFromCells([[...IMPORT_COLUMNS, 'cpf'], values]), /repetidas/);
-  assert.throws(() => rowsFromCells([IMPORT_COLUMNS, ...Array(501).fill(values)]), /500/);
+  assert.equal(rowsFromCells([IMPORT_COLUMNS, ...Array(MAX_IMPORT_ROWS).fill(values)]).length,5000);
+  assert.throws(() => rowsFromCells([IMPORT_COLUMNS, ...Array(MAX_IMPORT_ROWS+1).fill(values)]), /5000/);
   assert.throws(() => rowsFromCells([IMPORT_COLUMNS, [...values, 'extra']]), /mais campos/);
 });
 
@@ -84,7 +92,7 @@ test('leitura de XLSX real mantém CPF e CEP textuais e usa a primeira aba', asy
   assert.deepEqual(validateImportRow(row), []);
 });
 
-function actionWithDatabase({ role = 'operador', active = true, user = true, failCpf = '' } = {}) {
+function actionWithDatabase({ role = 'operador', active = true, user = true, failCpf = '', lookup = async cep=>({cep,logradouro:'Rua Afonso',bairro:'Pinheiros',localidade:'São Paulo',uf:'SP'}) } = {}) {
   const saved = [], documents = new Set(), revalidated = [];
   const database = {
     auth: { getUser: async () => ({ data: { user: user ? { id: 'user-1' } : null }, error: null }) },
@@ -110,12 +118,98 @@ function actionWithDatabase({ role = 'operador', active = true, user = true, fai
   const require = name => {
     if (name === 'next/cache') return { revalidatePath: path => revalidated.push(path) };
     if (name === '@/lib/supabase/server') return { createSupabaseServerClient: async () => database };
-    if (name === '@/lib/recipient-import') return { validateImportRow };
+    if (name === '@/lib/recipient-import') return importTools;
+    if (name === '@/lib/import-address') return addressTools;
+    if (name === '@/lib/postal-lookup') return {lookupPostalAddress:lookup};
     throw new Error(`Unexpected module: ${name}`);
   };
   new Function('require', 'exports', code)(require, exports);
-  return { action: exports.importRecipientsAction, saved, revalidated };
+  return { action: exports.importRecipientsAction, inspect: exports.inspectImportAddressesAction, saved, revalidated };
 }
+
+test('normaliza número marcado, sem número, cidade com UF, nome duplicado e CEP numérico', () => {
+  const [base] = rowsFromCells([IMPORT_COLUMNS,values]);
+  const row = normalizeImportRow({...base,full_name:'Carlos Torres Carlos Torres',endereco:'Rua Amparo número 105 casa 2',numero:'',complemento:'',cidade:'Rio de Janeiro/RJ',estado:'Rio de Janeiro',codigo_postal:'7792390'});
+  assert.equal(row.full_name,'Carlos Torres'); assert.equal(row.endereco,'Rua Amparo');
+  assert.equal(row.numero,'105'); assert.equal(row.complemento,'casa 2');
+  assert.equal(row.cidade,'Rio de Janeiro'); assert.equal(row.estado,'RJ'); assert.equal(row.codigo_postal,'07792390');
+  assert.equal(normalizeImportRow({...base,endereco:'Rua Amparo S/N',numero:''}).numero,'S/N');
+  assert.equal(normalizeImportRow({...base,endereco:'Rua 25',numero:''}).numero,'');
+  assert.equal(normalizeImportRow({...base,cpf:'1.23456789E+9'}).cpf,'01234567890');
+  assert.equal(normalizeImportRow({...base,endereco:'Rua Amparo 105',numero:'105'}).endereco,'Rua Amparo');
+  assert.equal(normalizeImportRow(row).complemento,row.complemento);
+});
+
+test('aceita aliases de cabeçalho e contatos opcionais, mas não inventa número ou contato', () => {
+  const [row] = rowsFromCells([['CPF','Nome completo','Endereço','CEP','numero'],['01234567890','Nome Teste','Rua Afonso','05426200','13']]);
+  assert.equal(row.email,''); assert.equal(row.phone_number,'');
+  assert.equal(row.numero,'13');
+  assert.deepEqual(validateImportRow({...row,bairro:'Pinheiros',cidade:'São Paulo',estado:'SP'}),[]);
+  assert.equal(normalizeImportRow({...row,numero:'',endereco:'Rua sem identificação'}).numero,'');
+});
+
+test('CEP corrige município e UF inequívocos sem sobrescrever rua, bairro e número divergentes', async () => {
+  const [base] = rowsFromCells([IMPORT_COLUMNS,values]);
+  const postal = async()=>({cep:'07792390',logradouro:'Rua Gilberto Carvalho',bairro:'Panorama (Polvilho)',localidade:'Cajamar',uf:'SP'});
+  const result = await addressTools.inspectImportAddress({...base,cidade:'Cajamar',estado:'RJ',endereco:'Rua Gilberto Carvalho',bairro:'Panorama (Polvilho)'},postal);
+  assert.equal(result.row.estado,'SP'); assert.equal(result.row.numero,'13'); assert.equal(result.reviewRequired,false);
+  const ambiguous = await addressTools.inspectImportAddress({...base,cidade:'São Paulo',estado:'SP'},postal);
+  assert.equal(ambiguous.row.cidade,'São Paulo'); assert.equal(ambiguous.row.endereco,base.endereco);
+  assert.equal(ambiguous.reviewRequired,true); assert.match(ambiguous.warnings.join(' '),/Município divergente/);
+});
+
+test('CEP completa bairro e município ausentes; indisponibilidade permite revisão manual sem validar como correto', async () => {
+  const [base] = rowsFromCells([IMPORT_COLUMNS,values]);
+  const result = await addressTools.inspectImportAddress({...base,bairro:'',cidade:'',estado:'',email:'',phone_number:''},async()=>({cep:base.codigo_postal,logradouro:base.endereco,bairro:'Pinheiros',localidade:'São Paulo',uf:'SP'}));
+  assert.equal(result.row.bairro,'Pinheiros'); assert.equal(result.row.cidade,'São Paulo');
+  assert.equal(result.reviewRequired,false); assert.ok(result.warnings.length>=2);
+  for (const lookup of [async()=>null,async()=>{throw new Error('offline');}]) {
+    const inspection = await addressTools.inspectImportAddress(base,lookup);
+    assert.equal(inspection.reviewRequired,true); assert.equal(inspection.row.numero,base.numero);
+    const db = actionWithDatabase({lookup});
+    assert.equal((await db.action([base]))[0].status,'error');
+    assert.equal((await db.action([{...base,review_confirmed:true}]))[0].status,'created');
+  }
+});
+
+test('servidor refaz normalização postal e exige confirmação para conflitos sem confiar na prévia', async () => {
+  const [base] = rowsFromCells([IMPORT_COLUMNS,values]);
+  const db = actionWithDatabase();
+  const result = await db.action([{...base,estado:'RJ',email:'',phone_number:''}]);
+  assert.equal(result[0].status,'created'); assert.equal(db.saved[0].p_state,'SP');
+  assert.equal(db.saved[0].p_email,null); assert.equal(db.saved[0].p_phone,null);
+  const conflict=actionWithDatabase();
+  const row={...base,endereco:'Rua completamente diferente',normalization_notes:['CEP conferido']};
+  assert.equal((await conflict.action([row]))[0].status,'error'); assert.equal(conflict.saved.length,0);
+  assert.equal((await conflict.action([{...row,review_confirmed:true}]))[0].status,'created');
+  assert.equal(conflict.saved[0].p_street,row.endereco);
+});
+
+test('conferência de CEP exige autenticação e limita concorrência a quatro consultas', async () => {
+  const [base] = rowsFromCells([IMPORT_COLUMNS,values]);
+  let active=0,maximum=0;
+  const db=actionWithDatabase({lookup:async()=>{ active++; maximum=Math.max(maximum,active); await new Promise(resolve=>setTimeout(resolve,2));active--;return null; }});
+  const rows=Array.from({length:20},(_,i)=>({...base,line:i+2}));
+  assert.equal((await db.inspect(rows)).length,20); assert.equal(maximum,4); assert.equal(db.saved.length,0);
+  await assert.rejects(actionWithDatabase({role:'consulta'}).inspect(rows));
+  await assert.rejects(db.inspect([...rows,base]),/20 linhas/);
+});
+
+test('prévia de 5000 linhas renderiza só a página de 50 linhas, com navegação e progresso', () => {
+  const [base]=rowsFromCells([IMPORT_COLUMNS,values]);
+  const rows=Array.from({length:5000},(_,i)=>({...base,line:i+2,cpf:String(i).padStart(11,'0')}));
+  const inspections=Object.fromEntries(rows.map(row=>[row.line,{row,warnings:[],reviewRequired:false}]));
+  let index=0;
+  const state=[true,rows,[],'',false,'grande.csv',2,inspections,'Endereços conferidos: 5000 de 5000',false];
+  const exports={};
+  const code=ts.transpileModule(readFileSync(new URL('../src/app/destinatarios/recipient-import.tsx',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
+  const modules={react:{...React,useState(initial){const actual=React.useState(initial);return [state[index++]??actual[0],actual[1]];}},'react/jsx-runtime':jsxRuntime,'lucide-react':icons,'next/navigation':{useRouter:()=>({refresh(){}})},'@/lib/recipient-import':importTools,'./import-actions':{}};
+  new Function('require','exports',code)(name=>modules[name],exports);
+  const html=renderToStaticMarkup(React.createElement(exports.RecipientImport,{existingDocuments:[]}));
+  assert.equal((html.match(/<tr>/g)||[]).length,51);
+  assert.match(html,/Página 2 de 100/); assert.match(html,/Nome, linha 52/);assert.doesNotMatch(html,/Nome, linha 2"/);
+  assert.match(html,/5000 linhas e 10 MB/);assert.match(html,/5000 de 5000/);
+});
 
 test('servidor bloqueia sessão ausente, perfil inativo, consulta e etapas grandes', async () => {
   const [row] = rowsFromCells([IMPORT_COLUMNS, values]);
@@ -140,7 +234,7 @@ test('servidor preserva campos e ignora CPF repetido ou reenviado', async () => 
 test('servidor revalida campos e continua após erro de uma linha', async () => {
   const [row] = rowsFromCells([IMPORT_COLUMNS, values]);
   const { action, saved } = actionWithDatabase({ failCpf: row.cpf });
-  const results = await action([row, { ...row, line: 3, cpf: '12345678901' }, { ...row, line: 4, estado: 'ZZ' }]);
+  const results = await action([row, { ...row, line: 3, cpf: '12345678901' }, { ...row, line: 4, cpf: '123' }]);
   assert.deepEqual(results.map(result => result.status), ['error', 'created', 'error']);
   assert.equal(saved.length, 1);
 });

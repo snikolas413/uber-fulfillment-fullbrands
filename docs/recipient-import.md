@@ -6,18 +6,48 @@ Na tela Destinatários, use **Importar arquivo**, selecione o arquivo, revise a 
 
 - Excel `.xlsx`: primeira aba; `.xls` deve ser convertido para `.xlsx`.
 - CSV com vírgula ou ponto e vírgula; TSV com tabulação.
-- Até 500 destinatários por arquivo e 5 MB.
-- Cabeçalho na primeira linha. Colunas: `cpf`, `full_name`, `phone_number`, `email`, `endereco`, `bairro`, `cidade`, `estado`, `codigo_postal`.
+- Até 5.000 destinatários por arquivo e 10 MB. A prévia mostra 50 linhas por página.
+- Cabeçalho na primeira linha. O modelo recomenda `cpf`, `full_name`, `phone_number`, `email`, `endereco`, `bairro`, `cidade`, `estado`, `codigo_postal`. São obrigatórias as colunas `cpf`, `full_name`, `endereco`, `codigo_postal`; as demais podem ser completadas pela consulta postal ou na prévia.
 - O modelo para download tem exatamente essas nove colunas, nessa ordem. Informe rua, número e complemento juntos em `endereco`, como `Rua Afonso 13 casa 2`.
 - Acentos e espaços nos cabeçalhos são normalizados: `endereço` e `código postal` são aceitos.
-- Colunas opcionais: `numero`, `complemento`. Quando `numero` está preenchido, `endereco` é usado como logradouro, sem separação automática.
-- Formate CPF, telefone e CEP como **texto** no Excel. Na leitura do arquivo, CPFs com exatamente 10 dígitos recebem um zero à esquerda para completar os 11 dígitos, inclusive quando a célula do Excel é numérica. A correção aparece na prévia antes da validação e da verificação de duplicidades. CPFs com outros tamanhos não são completados; telefone e CEP mantêm o tratamento atual.
+- Colunas opcionais: `numero`, `complemento`. Um número explícito tem prioridade; a repetição do mesmo número no endereço é separada quando inequívoca. Números diferentes não são substituídos.
+- Formate CPF, telefone e CEP como **texto** no Excel. CPFs com exatamente 10 dígitos e CEPs com exatamente 7 recebem um zero à esquerda. Outros tamanhos não são completados. Notação científica é convertida apenas quando representa um inteiro seguro. As correções aparecem na prévia antes da validação e da verificação de duplicidades.
+- Também são aceitos cabeçalhos como `nome completo`, `telefone`, `logradouro`, `município`, `UF` e `CEP`.
 
 ## Revisão e gravação
 
 `Rua Afonso 13 casa 2` é separado em `Rua Afonso`, `13`, `casa 2`. Endereços que não permitem identificar o número ficam pendentes até correção na prévia. Revise sempre a separação automática.
 
-CPF precisa ter 11 dígitos, CEP 8, telefone de 10 a 13 com DDD, e-mail válido, UF brasileira válida e endereço completo. O CPF é validado pelo tamanho, como no cadastro atual, sem verificação dos dígitos verificadores.
+CPF precisa ter 11 dígitos, CEP 8, UF brasileira válida e endereço completo. Telefone e e-mail são opcionais no cadastro; quando preenchidos precisam ser válidos (telefone de 10 a 13 dígitos com DDD). A ausência gera um aviso. O e-mail continua necessário antes de preparar um pedido. O CPF é validado pelo tamanho, sem verificação dos dígitos verificadores.
+
+## Tratamento e conferência do endereço
+
+O importador remove espaços e caracteres invisíveis, reconhece UF por nome completo,
+separa município e UF (`São Gonçalo/RJ`), reconhece `nº`, `número`, `S/N`, números
+com letras e complementos como `ap`, `casa`, `bloco`, `lote` e `quadra`. Nomes com
+um trecho final duplicado de forma inequívoca são normalizados. Dados longos não
+são cortados; limites que podem causar rejeição no Omie geram avisos para revisão.
+
+Após a leitura, o servidor consulta o ViaCEP enviando somente o CEP. Município e UF
+são corrigidos quando a consulta e os dados informados são compatíveis. Bairro e
+logradouro vazios podem ser preenchidos; valores divergentes são preservados e
+destacados. Número do imóvel nunca é inventado nem obtido por CEP. Não se trata
+de uma validação de que a residência existe: o endereço cadastrado continua pendente
+de validação.
+
+CEP inexistente, consulta indisponível ou divergências não descartam o arquivo.
+Corrija os campos e use **Conferir endereços novamente**, ou marque **Conferi
+manualmente os dados e as divergências desta linha** após verificar os dados.
+Essa confirmação não dispensa campos obrigatórios e formatos válidos. Alterar um
+campo invalida a confirmação e a conferência anteriores. A confirmação é individual,
+sem aprovação indiscriminada do arquivo. A prévia apresenta os ajustes e avisos;
+o servidor repete a normalização/conferência antes de gravar.
+
+A consulta usa até quatro requisições simultâneas e compartilha resultados de CEPs
+repetidos em cache limitado, sem armazenar dados de destinatários nesse cache.
+O progresso aparece por etapa; **Parar após etapa atual** permite interromper a
+conferência ou o cadastro sem perder etapas concluídas. Arquivos grandes podem
+demorar mais conforme a quantidade de CEPs diferentes e a disponibilidade do serviço.
 
 CPFs repetidos no arquivo ficam bloqueados após a primeira ocorrência. CPFs já cadastrados são ignorados; o arquivo não atualiza cadastros existentes. A consulta ao banco é repetida no servidor antes de cada cadastro. Não há restrição única de CPF no modelo atual: a consulta não garante exclusão de duplicatas entre duas importações simultâneas. Evite importar o mesmo lote em sessões paralelas até a definição de uma regra global de unicidade.
 
