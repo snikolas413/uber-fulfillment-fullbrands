@@ -57,11 +57,35 @@ O resultado mostra cadastros concluídos, ignorados e erros por linha. As linhas
 
 ## Relatório de pendências
 
+Esse relatório cobre somente as linhas do arquivo que não foram cadastradas.
+Para extrair a base já cadastrada, use o relatório abaixo.
+
 Quando existem linhas bloqueadas, a prévia oferece **Baixar relatório de pendências (CSV)**. O arquivo inclui `linha_arquivo`, `situacao`, `motivo` e as nove colunas do modelo, com os dados atuais da prévia e o endereço reunido em `endereco`.
 
 O relatório é atualizado após a importação e inclui validações locais, CPFs duplicados, erros no cadastro e linhas não processadas. Em interrupção de uma etapa, diferencia resultado não confirmado (a linha pode ter sido gravada antes da perda da resposta) de linha não enviada. Cadastros confirmados são excluídos do relatório. Linhas válidas que ainda não foram submetidas não são tratadas como erro.
 
 O download é feito no navegador e não armazena o arquivo no servidor. Abra o CSV importando CPF, telefone e CEP como texto para preservar zeros à esquerda. Antes de reenviar dados corrigidos, remova as colunas de diagnóstico se preferir usar somente a estrutura original; o importador também aceita colunas extras.
+
+## Relatório de destinatários cadastrados
+
+Na tela **Destinatários**, clique em **Exportar destinatários (CSV)** para baixar
+a base acessível ao seu perfil. Com uma busca preenchida, o botão muda para
+**Exportar busca (CSV)** e usa os mesmos critérios da pesquisa por nome, CPF,
+telefone, e-mail, município, UF e CEP. Limpe a busca para exportar toda a base.
+
+O relatório consulta o banco em páginas e não fica limitado aos registros
+carregados na tela. São considerados os destinatários cadastrados até o início
+da extração. Cada destinatário aparece uma vez, com seu endereço mais recente
+(desempate por ID), contatos, situação da validação e datas de cadastro/atualização
+no horário de São Paulo. Destinatários sem endereço também são incluídos.
+
+O CSV usa UTF-8 e separador `;`, preserva acentos e contém as colunas do modelo
+com rua, número e complemento separados, além do ID, status do endereço e datas.
+Ao importar no Excel, defina CPF, telefone e CEP como **texto** para manter zeros
+à esquerda; abrir o CSV diretamente no Excel pode convertê-los em números.
+
+A extração exige sessão e perfil ativo, respeita RLS e não modifica cadastros.
+Falhas na consulta impedem o download para não entregar um relatório incompleto.
 
 ## Validação
 

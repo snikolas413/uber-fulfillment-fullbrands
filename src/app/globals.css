@@ -215,6 +215,8 @@
 
 /* Omie operation controls */
 .import-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.recipient-export{display:flex;flex-direction:column;gap:6px;max-width:330px}
+.recipient-export small{font-size:11px;line-height:1.5;color:#637166}
 .import-modal{width:min(1450px,96vw);max-width:96vw}
 .import-content{padding:24px;overflow:auto;max-height:75vh}
 .import-content>p{font-size:13px;line-height:1.6;margin:0 0 14px}

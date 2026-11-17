@@ -8,6 +8,8 @@ import {
 } from "lucide-react";
 import { saveRecipientAction, type RecipientActionState } from "./actions";
 import { RecipientImport } from "./recipient-import";
+import { RecipientExport } from "./recipient-export";
+import { matchesRecipientSearch } from "@/lib/recipient-report";
 
 type Address = {
   id: string;
@@ -63,7 +65,7 @@ function formatDate(value: string) {
 
 function latestAddress(recipient: Recipient) {
   return [...(recipient.delivery_addresses ?? [])].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime() || b.id.localeCompare(a.id),
   )[0];
 }
 
@@ -83,22 +85,7 @@ export function RecipientManagement({
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
 
   const visibleRecipients = useMemo(() => {
-    const term = search.trim().toLocaleLowerCase("pt-BR");
-    if (!term) return recipients;
-    const numericTerm = digits(term);
-    return recipients.filter((recipient) => {
-      const address = latestAddress(recipient);
-      const searchable = [
-        recipient.full_name,
-        recipient.document_number ?? "",
-        recipient.email ?? "",
-        recipient.phone ?? "",
-        address?.city ?? "",
-        address?.state ?? "",
-        address?.postal_code ?? "",
-      ].join(" ").toLocaleLowerCase("pt-BR");
-      return searchable.includes(term) || (numericTerm.length > 0 && digits(searchable).includes(numericTerm));
-    });
+    return recipients.filter(recipient=>matchesRecipientSearch(recipient,search));
   }, [recipients, search]);
 
   const addressCount = recipients.reduce((total, recipient) => total + (recipient.delivery_addresses?.length ?? 0), 0);
@@ -131,7 +118,7 @@ export function RecipientManagement({
           <h1>Destinatários</h1>
           <p className="page-lead">Motoristas, contatos e endereços de entrega da operação Uber.</p>
         </div>
-        {canWrite && <div className="import-tools"><RecipientImport existingDocuments={recipients.map(recipient => recipient.document_number ?? "")} /><button type="button" className="primary-button" onClick={openNew}><Plus size={17} /> Novo destinatário</button></div>}
+        <div className="import-tools"><RecipientExport search={search}/>{canWrite && <><RecipientImport existingDocuments={recipients.map(recipient => recipient.document_number ?? "")} /><button type="button" className="primary-button" onClick={openNew}><Plus size={17} /> Novo destinatário</button></>}</div>
       </section>
 
       <section className="recipient-metrics">
