@@ -99,6 +99,21 @@ O faturamento ocorre por ação separada com confirmação explícita na aba **F
 
 Ao clicar em **Enviar ao Omie**, a aplicação resolve o cadastro ativo dos Correios, cria o pedido e seleciona automaticamente uma única opção Mini Envios pela API de Frete do Omie (`CotarFrete` e `SelecionarFrete` com `nIdFrete` e `lGratis: true`). A etapa permanece a atual, sem faturamento. Uma falha deixa a pendência visível sem refazer a inclusão. Somente em caso de pendência de frete aparece **Tentar frete novamente**, para recuperar essa etapa em pedidos existentes ainda não faturados; se a transportadora estiver vazia, define Correios e confere antes de cotar. Consultas bloqueadas por `REDUNDANT` aguardam o prazo informado dentro dos limites documentados e são repetidas uma vez. Etiqueta e postagem continuam dentro do Omie. O app também consulta o pedido para importar frete, modalidade, volumes, previsão e rastreio. Não existe chamada direta aos Correios pelo app.
 
+### Informações complementares da NF-e
+
+Pedidos novos enviam em `informacoes_adicionais.dados_adicionais_nf` a frase:
+“Entrega em domicílio de terceiro destinatário não contribuinte do ICMS”.
+Antes de faturar pelo aplicativo, pedidos existentes também recebem essa frase,
+se ausente, preservando as observações anteriores e usando `|` como separador
+de linhas do Omie. A frase não é duplicada e `consumidor_final` permanece inalterado.
+
+Depois de alterar o pedido, o aplicativo consulta o Omie novamente e exige a
+confirmação do texto completo antes de solicitar a emissão. Falha na atualização
+ou na conferência impede o faturamento. Pedidos cancelados ou já faturados não
+são alterados. Nos pedidos pendentes, a atualização ocorre quando o usuário
+aciona o faturamento pelo aplicativo; não há emissão automática em segundo plano
+nem alteração de notas já autorizadas.
+
 ## Configuração ainda necessária
 - Credenciais próprias do app Omie (app_hash, access token, refresh token e timestamp ISO do primeiro token) no Render.
 - Confirmação fiscal/comercial dos parâmetros de venda e faturamento antes do primeiro pedido real.

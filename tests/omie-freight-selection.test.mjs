@@ -15,7 +15,8 @@ function loadModule(path, modules = {}) {
 
 const freight = loadModule('../src/lib/omie/freight-selection.ts');
 const itemIcms = loadModule('../src/lib/omie/item-icms.ts');
-const billing = loadModule('../src/lib/omie/invoice-order.ts', { '@/lib/omie/item-icms': itemIcms });
+const invoiceNotes = loadModule('../src/lib/omie/invoice-notes.ts');
+const billing = loadModule('../src/lib/omie/invoice-order.ts', { '@/lib/omie/item-icms': itemIcms, '@/lib/omie/invoice-notes':invoiceNotes });
 const id = '11111111-1111-4111-8111-111111111111';
 const integrationCode = 'UFB-' + id.replaceAll('-', '');
 const mini = { nIdFrete: 987, cTipoServico: '04227', cDescricaoServico: 'Mini Envios', cNomeTransportadora: 'CORREIOS', nDiasEntrega: 5, nValorFrete: 12.5 };
@@ -161,6 +162,7 @@ function actionsStub(options = {}) {
     '@/lib/omie/invoice-order': billing,
     '@/lib/omie/item-icms': itemIcms,
     '@/lib/omie/order-reference': loadModule('../src/lib/omie/order-reference.ts'),
+    '@/lib/omie/invoice-notes': invoiceNotes,
     '@/lib/omie/client': { callOmie: omie.request, OmieApiError: ApiError, OmieConfigurationError: ApiError },
   });
   return { actions, writes, audits, shipments, calls: omie.calls };
@@ -184,6 +186,7 @@ test('criação segue referência 1107 com impostos completos, e-mail do destina
   assert.equal(payload.det[0].inf_adic.nao_movimentar_estoque, 'N');
   assert.equal(payload.det[0].inf_adic.nao_gerar_financeiro, 'N');
   assert.equal(payload.informacoes_adicionais.utilizar_emails, 'teste@example.com');
+  assert.equal(payload.informacoes_adicionais.dados_adicionais_nf,'Entrega em domicílio de terceiro destinatário não contribuinte do ICMS');
   assert.deepEqual(payload.frete, { codigo_transportadora: 123 }); assert.equal(payload.det[0].inf_adic.numero_pedido_compra, '');
   assert.equal(audits[1].action, 'omie.freight.selected'); assert.equal(audits[1].after_summary.freight_quote_id, 987);
   assert.equal(shipments[0].freight_amount, 0);

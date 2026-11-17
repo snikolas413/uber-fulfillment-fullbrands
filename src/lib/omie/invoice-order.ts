@@ -1,4 +1,5 @@
 import { simulateItemTaxes, hasCompleteItemIcms } from "@/lib/omie/item-icms";
+import { withDeliveryInvoiceNote, sameInvoiceNotes } from "@/lib/omie/invoice-notes";
 
 export type BillingOutcome = "confirmed" | "submitted" | "unknown" | "rejected" | "blocked";
 export type BillingControlState = "billing_processing" | "billing_submitted" | "billing_unknown" | "billing_rejected";
@@ -16,7 +17,7 @@ type BillingItem = {
 };
 type BillingOrder = {
   cabecalho?: { codigo_pedido?: number; codigo_pedido_integracao?: string; codigo_cenario_impostos?: number | string; codigo_cliente?: number; etapa?: string; bloqueado?: string };
-  informacoes_adicionais?: { consumidor_final?: string; outros_detalhes?: { cEstadoOd?: string } };
+  informacoes_adicionais?: { consumidor_final?: string; dados_adicionais_nf?: string; outros_detalhes?: { cEstadoOd?: string } };
   infoCadastro?: { faturado?: string; cancelado?: string };
   frete?: { codigo_transportadora?: number; valor_frete?: number; valor_seguro?: number; outras_despesas?: number };
   det?: BillingItem[];
@@ -87,18 +88,25 @@ export async function invoiceExistingOrder({ request, orderId, integrationCode, 
     claimed = await claim();
     if (!claimed) return { outcome: "blocked", message: "Este pedido possui uma solicitação de faturamento em andamento ou sem confirmação. Use Atualizar Omie; nenhuma nova emissão foi solicitada." };
     const refreshItems = await scenarioRefreshItems(request, order);
-    if (refreshItems.length) {
-      taxScenarioRefreshRequested = true;
+    const requiredNotes = withDeliveryInvoiceNote(order.informacoes_adicionais?.dados_adicionais_nf);
+    const noteNeedsUpdate = requiredNotes !== (order.informacoes_adicionais?.dados_adicionais_nf ?? "");
+    if (refreshItems.length || noteNeedsUpdate) {
+      taxScenarioRefreshRequested = refreshItems.length > 0;
       const refreshed = await request<{ codigo_status?: string; descricao_status?: string }>("/produtos/pedido/", "AlterarPedidoVenda", {
-        cabecalho: { codigo_pedido: orderId, codigo_pedido_integracao: integrationCode }, det: refreshItems,
+        cabecalho: { codigo_pedido: orderId, codigo_pedido_integracao: integrationCode },
+        ...(refreshItems.length ? { det: refreshItems } : {}),
+        ...(noteNeedsUpdate ? { informacoes_adicionais: { ...order.informacoes_adicionais, dados_adicionais_nf: requiredNotes } } : {}),
       });
-      if (String(refreshed.codigo_status ?? "") !== "0") throw new Error(refreshed.descricao_status || "O Omie não confirmou a atualização dos impostos pelo cenário selecionado.");
+      if (String(refreshed.codigo_status ?? "") !== "0") throw new Error(refreshed.descricao_status || "O Omie não confirmou a atualização das informações da NF-e. Nenhuma emissão foi solicitada.");
       const saved = await readOrder();
       if (saved?.cabecalho?.codigo_pedido !== orderId || saved.cabecalho.codigo_pedido_integracao !== integrationCode ||
         String(saved.cabecalho.codigo_cenario_impostos) !== String(order.cabecalho.codigo_cenario_impostos) ||
         saved.infoCadastro?.cancelado === "S" || saved.infoCadastro?.faturado === "S" || saved.cabecalho.bloqueado === "S" ||
         saved.frete?.codigo_transportadora !== carrierId || (saved.frete.valor_frete !== undefined && saved.frete.valor_frete !== 0)) {
-        throw new Error("O pedido mudou durante a atualização fiscal. Consulte o Omie antes de continuar.");
+        throw new Error("O pedido mudou durante a atualização das informações da NF-e. Consulte o Omie antes de continuar.");
+      }
+      if (!sameInvoiceNotes(saved.informacoes_adicionais?.dados_adicionais_nf, requiredNotes)) {
+        throw new Error("O Omie não confirmou a frase de entrega nas informações complementares, preservando as observações anteriores. Nenhuma emissão foi solicitada.");
       }
       for (const original of refreshItems) {
         const item = saved.det?.find(candidate => candidate.ide?.codigo_item === original.ide.codigo_item);

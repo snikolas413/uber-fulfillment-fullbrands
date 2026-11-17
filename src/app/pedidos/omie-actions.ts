@@ -7,6 +7,7 @@ import { selectMiniEnviosFreight, resolveCorreiosCarrier, FreightSelectionError,
 import { invoiceExistingOrder, type BillingOutcome, type BillingControlState } from "@/lib/omie/invoice-order";
 import { simulateItemTaxes, ItemIcmsError } from "@/lib/omie/item-icms";
 import { ORDER_REFERENCE as reference } from "@/lib/omie/order-reference";
+import { DELIVERY_INVOICE_NOTE } from "@/lib/omie/invoice-notes";
 
 export type OmieActionResult = { status: "success" | "error" | "warning"; message: string };
 type Recipient = { full_name: string; document_number: string | null; email: string | null; phone: string | null };
@@ -165,7 +166,7 @@ async function includeOrder(supabase: Awaited<ReturnType<typeof createSupabaseSe
     exportacao: { nao_exportacao: "N" },
     informacoes_adicionais: {
       codigo_categoria: reference.category, codigo_conta_corrente: reference.accountId,
-      numero_pedido_cliente: "", dados_adicionais_nf: "",
+      numero_pedido_cliente: "", dados_adicionais_nf: DELIVERY_INVOICE_NOTE,
       consumidor_final: "S", utilizar_emails: email, enviar_email: "N", enviar_pix: "N",
       outros_detalhes: {
         cNomeOd: recipient.full_name, cCnpjCpfOd: recipient.document_number ?? "",
@@ -394,7 +395,7 @@ export async function invoiceOrderAction(id: string, confirmed = false): Promise
       try { await reconcile(supabase, userId, row, result.snapshot); }
       catch { message += " Não foi possível atualizar a cópia local. Consulte o Omie antes de repetir."; status = "warning"; }
     }
-    await audit(supabase, userId, id, "omie.invoice.result", { omie_order_id: row.omie_order_id, outcome: result.outcome, tax_scenario_refresh_requested: Boolean(result.taxScenarioRefreshRequested), message: message.slice(0, 500) });
+    await audit(supabase, userId, id, "omie.invoice.result", { omie_order_id: row.omie_order_id, outcome: result.outcome, required_invoice_note: DELIVERY_INVOICE_NOTE, tax_scenario_refresh_requested: Boolean(result.taxScenarioRefreshRequested), message: message.slice(0, 500) });
     await supabase.from("fulfillments").update({ omie_last_error: status === "success" ? null : ("Faturamento: " + message).slice(0, 500) }).eq("id", id);
     revalidatePath("/faturamento"); revalidatePath("/pedidos");
     return { status, message, billingOutcome: result.outcome };

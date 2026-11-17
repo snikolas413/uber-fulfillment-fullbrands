@@ -13,7 +13,8 @@ function loadModule(path, modules = {}) {
   return exports;
 }
 const itemIcms = loadModule('../src/lib/omie/item-icms.ts');
-const billing = loadModule('../src/lib/omie/invoice-order.ts', { '@/lib/omie/item-icms': itemIcms });
+const invoiceNotes = loadModule('../src/lib/omie/invoice-notes.ts');
+const billing = loadModule('../src/lib/omie/invoice-order.ts', { '@/lib/omie/item-icms': itemIcms, '@/lib/omie/invoice-notes':invoiceNotes });
 const freight = loadModule('../src/lib/omie/freight-selection.ts');
 const id = '11111111-1111-4111-8111-111111111111';
 const integrationCode = 'UFB-' + id.replaceAll('-', '');
@@ -21,16 +22,21 @@ const integrationCode = 'UFB-' + id.replaceAll('-', '');
 function omie(options = {}) {
   const calls = [], states = [];
   let requested = false, locked = false, refreshed = false;
+  let notes = options.notes ?? invoiceNotes.DELIVERY_INVOICE_NOTE;
+  let orderReads = 0;
   const snapshot = () => ({ codigo_pedido: 555, codigo_pedido_integracao: integrationCode, numero_pedido: '1140', etapa: '50',
     faturada: options.alreadyBilled || (requested && !options.delayed) ? 'S' : 'N',
     ListaNfe: options.alreadyBilled || (requested && !options.delayed) ? [{ numero_nfe: '123', chave_nfe: 'chave-teste' }] : [], ...options.status });
   const request = async (endpoint, method, params) => {
     calls.push({ endpoint, method, params });
-    if (method === 'ConsultarPedido') return { pedido_venda_produto: {
+    if (method === 'ConsultarPedido') {
+      orderReads++;
+      if (orderReads > 1 && options.noteReadError) throw new Error('Consulta indisponível');
+      return { pedido_venda_produto: {
       cabecalho: { codigo_pedido: options.wrongOrder ? 999 : 555, codigo_pedido_integracao: integrationCode, codigo_cenario_impostos: '777', codigo_cliente: 888, etapa: options.stage ?? '10', bloqueado: options.blocked ? 'S' : 'N' },
-      infoCadastro: { faturado: options.alreadyBilled ? 'S' : 'N', cancelado: options.cancelled ? 'S' : 'N' },
+      infoCadastro: { faturado: options.alreadyBilled || (orderReads > 1 && options.billedDuringUpdate) ? 'S' : 'N', cancelado: options.cancelled ? 'S' : 'N' },
       frete: { codigo_transportadora: options.changedCarrier ? 999 : 123, ...(options.omitFreight ? {} : { valor_frete: options.notFree ? 12 : 0 }) },
-      informacoes_adicionais: { consumidor_final: 'S', outros_detalhes: { cEstadoOd: 'SC', cEnderecoOd: 'Rua Teste' } },
+      informacoes_adicionais: { consumidor_final: 'S', dados_adicionais_nf:notes, outros_detalhes: { cEstadoOd: 'SC', cEnderecoOd: 'Rua Teste' } },
       det: [{ ide: { codigo_item: 1234, codigo_item_integracao: 'item-teste', simples_nacional: options.simples ? 'S' : 'N' },
         produto: { codigo_produto: 987, codigo: 'R18', quantidade: 1, valor_unitario: refreshed && options.changedPrice ? 99 : 107.97, valor_total: 122.01 },
         inf_adic: { codigo_cenario_impostos_item: '777', nao_gerar_financeiro: 'S', nao_movimentar_estoque: 'S' },
@@ -38,7 +44,7 @@ function omie(options = {}) {
           icms: { cod_sit_trib_icms: '00', origem_icms: '1', modalidade_icms: '3', perc_red_base_icms: 0, aliq_icms: 4, base_icms: options.noBase ? 0 : 126.03, valor_icms: 5.04 },
         },
       }],
-    } };
+    } }; }
     if (method === 'ConsultarProduto') return { codigo_produto: params.codigo_produto, recomendacoes_fiscais: { origem_mercadoria: '1' } };
     if (method === 'SimularImpostos') return { codigo_cliente: params.codigo_cliente, det_simul_resp: [{ codigo_cenario_impostos_item: 777,
       produto_simul_resp: { ...params.det_simul[0].produto_simul }, imposto: options.simples ? {
@@ -46,7 +52,12 @@ function omie(options = {}) {
       } : { icms: options.emptySimulation ? {} : { cod_sit_trib_icms: '00', origem_icms: '1', modalidade_icms: '3', perc_red_base_icms: 0, aliq_icms: 4, base_icms: 126.03, valor_icms: 5.04 } },
     }] };
     if (method === 'ListarImpostosCenario') return { ...params, impostos: { cst_icms: '00', modalidade_bc_icms: '3', reducao_bc_icms: 0, aliquota_icms: 4, perc_fcp_icms: 0, csosn: '102', aliquota_icms_simples: 0 } };
-    if (method === 'AlterarPedidoVenda') { refreshed = true; return { codigo_status: options.refreshError ? '1' : '0', descricao_status: 'Atualização fiscal recusada' }; }
+    if (method === 'AlterarPedidoVenda') {
+      if (params.informacoes_adicionais && options.noteTimeout) throw new Error('Tempo de resposta esgotado');
+      if(params.det)refreshed = true;
+      if(params.informacoes_adicionais && !options.ignoreNotes && !options.noteError) notes=options.dropPreviousNotes ? invoiceNotes.DELIVERY_INVOICE_NOTE : params.informacoes_adicionais.dados_adicionais_nf;
+      return { codigo_status: options.refreshError || options.noteError ? '1' : '0', descricao_status: 'Atualização recusada' };
+    }
     if (method === 'TrocarEtapaPedido') return { codigo_status: options.stageError ? '1' : '0', descricao_status: 'Etapa não liberada' };
     if (method === 'StatusPedido') {
       if (requested && options.afterReadError) throw new Error('Consulta indisponível');
@@ -87,6 +98,55 @@ test('não muda etapa já preparada nem reemite pedido já faturado', async () =
   const billed = omie({ alreadyBilled: true });
   assert.equal((await billing.invoiceExistingOrder(billed.args)).outcome, 'confirmed');
   assert.deepEqual(billed.calls.map(call => call.method), ['ConsultarPedido', 'StatusPedido']);
+});
+
+test('pedidos antigos recebem a frase antes de faturar, com releitura e preservação das observações', async () => {
+  for (const notes of ['', 'Observação anterior|Entrega a consumidor final']) {
+    const { args, calls } = omie({ notes });
+    assert.equal((await billing.invoiceExistingOrder(args)).outcome, 'confirmed');
+    const updates = calls.filter(call => call.method === 'AlterarPedidoVenda');
+    assert.equal(updates.length, 1);
+    assert.deepEqual(updates[0].params, {
+      cabecalho: { codigo_pedido: 555, codigo_pedido_integracao: integrationCode },
+      informacoes_adicionais: { consumidor_final: 'S', dados_adicionais_nf: notes ? notes + '|' + invoiceNotes.DELIVERY_INVOICE_NOTE : invoiceNotes.DELIVERY_INVOICE_NOTE,
+        outros_detalhes: { cEstadoOd: 'SC', cEnderecoOd: 'Rua Teste' } },
+    });
+    const index = calls.indexOf(updates[0]);
+    assert.equal(calls[index + 1].method, 'ConsultarPedido');
+    assert.ok(index < calls.findIndex(call => call.method === 'FaturarPedidoVenda'));
+    assert.ok(!calls.some(call => call.method === 'IncluirPedido'));
+  }
+});
+
+test('frase não é duplicada e atualização de impostos e observação ocorre em uma única alteração', async () => {
+  const notes = 'Observação|' + invoiceNotes.DELIVERY_INVOICE_NOTE;
+  assert.equal(invoiceNotes.withDeliveryInvoiceNote(notes), notes);
+  assert.equal(invoiceNotes.sameInvoiceNotes(notes.replace('|', '\n'), notes), true);
+  assert.equal(invoiceNotes.sameInvoiceNotes(invoiceNotes.DELIVERY_INVOICE_NOTE, notes), false);
+  const existing = omie({ notes });
+  assert.equal((await billing.invoiceExistingOrder(existing.args)).outcome, 'confirmed');
+  assert.ok(!existing.calls.some(call => call.method === 'AlterarPedidoVenda'));
+  const missing = omie({ notes: 'Observação anterior', missingIcms: true });
+  assert.equal((await billing.invoiceExistingOrder(missing.args)).outcome, 'confirmed');
+  const updates = missing.calls.filter(call => call.method === 'AlterarPedidoVenda');
+  assert.equal(updates.length, 1);
+  assert.ok(updates[0].params.det);
+  assert.equal(updates[0].params.informacoes_adicionais.dados_adicionais_nf, 'Observação anterior|' + invoiceNotes.DELIVERY_INVOICE_NOTE);
+});
+
+test('sem confirmação da frase e das observações anteriores, não valida nem emite NF-e', async () => {
+  for (const options of [{ ignoreNotes: true }, { noteError: true }, { noteReadError: true }, { noteTimeout: true }, { dropPreviousNotes: true }, { billedDuringUpdate: true }]) {
+    const { args, calls, states } = omie({ notes: 'Observação anterior', ...options });
+    assert.equal((await billing.invoiceExistingOrder(args)).outcome, 'rejected');
+    assert.ok(!calls.some(call => ['ValidarPedidoVenda', 'FaturarPedidoVenda'].includes(call.method)));
+    assert.deepEqual(states, ['billing_rejected']);
+    assert.equal(calls.filter(call => call.method === 'AlterarPedidoVenda').length, 1);
+  }
+  for (const options of [{ alreadyBilled: true }, { cancelled: true }, { claimDenied: true }]) {
+    const { args, calls } = omie({ notes: '', ...options });
+    await billing.invoiceExistingOrder(args);
+    assert.ok(!calls.some(call => ['AlterarPedidoVenda', 'FaturarPedidoVenda'].includes(call.method)));
+  }
 });
 
 test('ICMS ausente reaplica o cenário já escolhido, preservando dados e endereços sem fixar CST', async () => {
@@ -214,6 +274,7 @@ function actionHarness(options = {}) {
     '@/lib/omie/freight-selection': freight, '@/lib/omie/invoice-order': billing,
     '@/lib/omie/item-icms': itemIcms,
     '@/lib/omie/order-reference': loadModule('../src/lib/omie/order-reference.ts'),
+    '@/lib/omie/invoice-notes': invoiceNotes,
     '@/lib/omie/client': { callOmie: upstream.args.request, OmieApiError: ApiError, OmieConfigurationError: ApiError },
   });
   return { actions, records, calls: upstream.calls };
