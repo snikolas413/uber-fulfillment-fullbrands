@@ -10,7 +10,7 @@ import { canPrepareShippingLabel, runShippingLabelBatch } from "@/lib/omie/shipp
 
 type Shipment = { tracking_code: string | null; tracking_url: string | null; estimated_delivery_date: string | null; package_count: number | null; label_storage_path: string | null; label_generation_state: string; freight_amount: number | null };
 type Invoice = { omie_invoice_number: string | null; access_key: string | null; status: string };
-export type ShippingRow = { id: string; status: string; created_at: string; recipients: { full_name: string } | null; delivery_addresses: { city: string; state: string; postal_code: string } | null; shipments: Shipment | Shipment[] | null; invoices: Invoice | Invoice[] | null };
+export type ShippingRow = { id: string; delivery_recipient_name?: string | null; status: string; created_at: string; recipients: { full_name: string } | null; delivery_addresses: { city: string; state: string; postal_code: string } | null; shipments: Shipment | Shipment[] | null; invoices: Invoice | Invoice[] | null };
 function firstRelation<T>(value: T | T[] | null | undefined): T | null { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
 const statusLabel = (status: string) => ({ billed: "Faturado · aguardando expedição", billing_pending: "Conferir confirmação da NF-e", shipping_pending: "Aguardando etiqueta", label_ready: "Etiqueta disponível", shipped: "Enviado" })[status] ?? status;
 const date = (value: string) => new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(new Date(value));
@@ -31,7 +31,7 @@ export function ShippingManagement({ rows, canGenerate, loadError }: { rows: Shi
   const [message, setMessage] = useState("");
   useEffect(() => () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); }, [pdfUrl]);
   const term = search.trim().toLocaleLowerCase("pt-BR");
-  const visible = rows.filter(row => [row.recipients?.full_name, firstRelation(row.invoices)?.omie_invoice_number, firstRelation(row.shipments)?.tracking_code].join(" ").toLocaleLowerCase("pt-BR").includes(term));
+  const visible = rows.filter(row => [row.delivery_recipient_name ?? row.recipients?.full_name, firstRelation(row.invoices)?.omie_invoice_number, firstRelation(row.shipments)?.tracking_code].join(" ").toLocaleLowerCase("pt-BR").includes(term));
   const ready = (row: ShippingRow) => results[row.id]?.status === "success" || Boolean(firstRelation(row.shipments)?.label_generation_state === "ready" && firstRelation(row.shipments)?.label_storage_path);
   const eligible = (row: ShippingRow) => ready(row) || (!results[row.id] && canPrepareShippingLabel(firstRelation(row.shipments)?.label_generation_state ?? "none"));
   const visibleEligible = visible.filter(eligible);
@@ -97,7 +97,7 @@ export function ShippingManagement({ rows, canGenerate, loadError }: { rows: Shi
         const shipment = firstRelation(row.shipments); const invoice = firstRelation(row.invoices); const result = results[row.id];
         return <tr key={row.id}>
           {canGenerate && <td><input type="checkbox" aria-label={`Selecionar envio de ${row.recipients?.full_name ?? row.id}`} checked={selected.includes(row.id)} disabled={running || !eligible(row) || (!selected.includes(row.id) && chosen.length >= 100)} onChange={event => setSelected(current => event.target.checked ? [...current, row.id] : current.filter(id => id !== row.id))} /></td>}
-          <td><strong>{row.recipients?.full_name ?? "Destinatário indisponível"}</strong><small>{date(row.created_at)}</small></td>
+          <td><strong>{row.delivery_recipient_name ?? row.recipients?.full_name ?? "Destinatário indisponível"}</strong><small>{date(row.created_at)}</small></td>
           <td>{row.delivery_addresses ? `${row.delivery_addresses.city}/${row.delivery_addresses.state} · ${row.delivery_addresses.postal_code}` : "Endereço indisponível"}</td>
           <td>{invoice?.omie_invoice_number ?? "—"}</td>
           <td><strong>{shipment?.tracking_code ?? "Aguardando código"}</strong>{shipment?.tracking_url && <small><a href={shipment.tracking_url} target="_blank" rel="noreferrer">Acompanhar entrega</a></small>}</td>

@@ -14,6 +14,7 @@ type Address = { street: string; number: string; complement: string | null; dist
 type Item = { omie_product_id: number; product_code: string; description: string; ncm: string | null; cfop: string | null; unit: string; quantity: number; unit_price: number };
 type Fulfillment = {
   id: string; status: string; omie_order_id: number | null; omie_order_number: string | null;
+  updated_at: string; delivery_recipient_name?: string | null; omie_send_started_at?: string | null;
   omie_customer_id: number | null; omie_tax_scenario_id: number | null;
   customer_purchase_order: string | null; customer_email: string | null;
   omie_last_error?: string | null;
@@ -74,7 +75,7 @@ async function context() {
 }
 async function load(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, id: string) {
   const { data, error } = await supabase.from("fulfillments")
-    .select("id,status,omie_order_id,omie_order_number,omie_customer_id,omie_tax_scenario_id,customer_purchase_order,customer_email,omie_last_error,recipients(full_name,document_number,email,phone),delivery_addresses(street,number,complement,district,city,state,postal_code,validation_status),fulfillment_items(omie_product_id,product_code,description,ncm,cfop,unit,quantity,unit_price)")
+    .select("id,status,updated_at,delivery_recipient_name,omie_send_started_at,omie_order_id,omie_order_number,omie_customer_id,omie_tax_scenario_id,customer_purchase_order,customer_email,omie_last_error,recipients(full_name,document_number,email,phone),delivery_addresses(street,number,complement,district,city,state,postal_code,validation_status),fulfillment_items(omie_product_id,product_code,description,ncm,cfop,unit,quantity,unit_price)")
     .eq("id", id).maybeSingle();
   if (error || !data) throw new Error("Não foi possível carregar o pedido local.");
   return data as unknown as Fulfillment;
@@ -139,7 +140,8 @@ async function reconcile(supabase: Awaited<ReturnType<typeof createSupabaseServe
   };
 }
 function validateOrder(row: Fulfillment) {
-  const recipient = relation(row.recipients);
+  const originalRecipient = relation(row.recipients);
+  const recipient = originalRecipient ? { ...originalRecipient, full_name: row.delivery_recipient_name ?? originalRecipient.full_name } : null;
   const address = relation(row.delivery_addresses);
   const item = row.fulfillment_items?.[0];
   if (!recipient || !address || !item) throw new Error("O pedido não possui destinatário, endereço ou item válido.");
@@ -265,9 +267,13 @@ export async function selectMiniEnviosFreightAction(id: string): Promise<OmieAct
 }
 
 export async function sendOrderToOmieAction(id: string, confirmRetry = false): Promise<OmieActionResult> {
+  let releaseLock: (() => Promise<void>) | null = null;
   try {
     const { supabase, userId } = await context();
     let row = await load(supabase, id);
+    if (row.omie_send_started_at && Date.parse(row.omie_send_started_at) > Date.now() - 15 * 60_000) {
+      return { status: "warning", message: "Já existe um envio em andamento para este pedido. Aguarde antes de tentar novamente." };
+    }
     validateOrder(row);
     if (["order_created", "billing_pending", "billed", "shipping_pending", "label_ready", "shipped"].includes(row.status)) {
       return { status: "warning", message: "Este pedido já avançou no Omie. Use a sincronização para consultar a situação." };
@@ -306,19 +312,19 @@ export async function sendOrderToOmieAction(id: string, confirmRetry = false): P
     }
     const otherTaxes = await simulateItemTaxes(callOmie, { scenarioId, customerId, productId: item.omie_product_id,
       quantity: Number(item.quantity), unitPrice: Number(item.unit_price), deliveryState: address.state });
-    if (row.status === "ready") {
-      const { data: lock, error } = await supabase.from("fulfillments").update({
-        status: "order_pending", omie_last_error: null,
-      }).eq("id", row.id).eq("status", "ready").select("id").maybeSingle();
-      if (error || !lock) return { status: "warning", message: "O pedido mudou de situação. Atualize a tela antes de continuar." };
-      row = { ...row, status: "order_pending" };
-    } else {
-      const { error } = await supabase.from("fulfillments").update({
-        status: "order_pending", omie_last_error: null,
-      }).eq("id", row.id);
-      if (error) throw new Error("Não foi possível reservar a nova tentativa de envio.");
-      row = { ...row, status: "order_pending" };
-    }
+    const startedAt = new Date().toISOString();
+    const staleBefore = new Date(Date.now() - 15 * 60_000).toISOString();
+    const { data: lock, error: lockError } = await supabase.from("fulfillments").update({
+      status: "order_pending", omie_last_error: null, omie_send_started_at: startedAt, updated_at: startedAt,
+    }).eq("id", row.id).eq("status", row.status).eq("updated_at", row.updated_at).is("omie_order_id", null)
+      .or(`omie_send_started_at.is.null,omie_send_started_at.lt.${staleBefore}`).select("id").maybeSingle();
+    if (lockError || !lock) return { status: "warning", message: "O pedido mudou ou outro envio está em andamento. Atualize a tela e confira os dados antes de continuar." };
+    releaseLock = async () => {
+      const { error } = await supabase.from("fulfillments").update({ omie_send_started_at: null })
+        .eq("id", id).eq("omie_send_started_at", startedAt);
+      if (error) console.error("Não foi possível liberar a reserva de envio do pedido.");
+    };
+    row = { ...row, status: "order_pending" };
 
     try {
       return await includeOrder(supabase, userId, row, carrierId, otherTaxes);
@@ -331,6 +337,8 @@ export async function sendOrderToOmieAction(id: string, confirmRetry = false): P
     }
   } catch (error) {
     return { status: "error", message: errorMessage(error) };
+  } finally {
+    if (releaseLock) await releaseLock().catch(() => console.error("Falha ao liberar reserva de envio."));
   }
 }
 

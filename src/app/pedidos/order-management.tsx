@@ -7,6 +7,7 @@ import {
   AlertCircle, Send, LoaderCircle
 } from "lucide-react";
 import { OrderBatchModal } from "./order-batch-modal";
+import { OrderReviewEditor } from "./order-review-editor";
 import { OmieActionButton } from "@/components/omie-action-button";
 import { ShippingEditor } from "@/app/expedicao/shipping-editor";
 import { sendOrderToOmieAction } from "./omie-actions";
@@ -48,6 +49,7 @@ type OrderItem = {
 
 export type OrderDraft = {
   id: string;
+  delivery_recipient_name?: string | null;
   status: string;
   omie_order_id: number | null;
   omie_order_number: string | null;
@@ -73,7 +75,7 @@ function formatDate(value: string) {
 function statusLabel(status: string) {
   const labels: Record<string, string> = {
     ready: "Rascunho preparado",
-    order_pending: "Aguardando envio ao Omie",
+    order_pending: "Revisar envio",
     order_created: "Pedido no Omie",
     billing_pending: "Aguardando faturamento",
     billed: "Faturado",
@@ -207,7 +209,7 @@ export function OrderManagement({
                   return (
                     <tr key={draft.id}>
                       {canWrite && <td><input type="checkbox" aria-label={`Selecionar pedido de ${draft.recipients?.full_name ?? draft.id}`} checked={selected.includes(draft.id)} disabled={sending || !eligible(draft) || (!selected.includes(draft.id) && selectedOrders.length >= 100)} onChange={event => setSelected(current => event.target.checked ? [...current, draft.id] : current.filter(id => id !== draft.id))} /></td>}
-                      <td><strong>{draft.recipients?.full_name ?? "Destinatário indisponível"}</strong><small>{draft.omie_order_number ? `Omie #${draft.omie_order_number}` : "Ainda sem número Omie"}</small></td>
+                      <td><strong>{draft.delivery_recipient_name ?? draft.recipients?.full_name ?? "Destinatário indisponível"}</strong><small>{draft.omie_order_number ? `Omie #${draft.omie_order_number}` : "Ainda sem número Omie"}</small></td>
                       <td><strong>{item?.description ?? "Produto não informado"}</strong><small>{item?.product_code ?? "Sem código"} · {item?.quantity ?? 0} un.</small></td>
                       <td>{draft.customer_purchase_order || "Não informada"}</td>
                       <td><span className="orders-address"><MapPin size={12} />{draft.delivery_addresses ? `${draft.delivery_addresses.city}/${draft.delivery_addresses.state} · ${draft.delivery_addresses.postal_code}` : "Sem endereço"}</span></td>
@@ -216,9 +218,10 @@ export function OrderManagement({
                       <td><span className={`order-status order-status-${draft.status}`}>{statusLabel(draft.status)}</span></td>
                       <td><span className="orders-date"><Clock3 size={12} />{formatDate(draft.created_at)}</span></td>
                       <td>
+                        {canWrite && !draft.omie_order_id && ["order_pending", "error"].includes(draft.status) && <OrderReviewEditor fulfillmentId={draft.id} disabled={sending} />}
                         {activeId === draft.id && <small role="status">Criando pedido e selecionando Mini Envios...</small>}
                         {sendResults[draft.id] && <small role="status" className={`omie-action-result omie-action-result-${sendResults[draft.id].status}`}>{sendResults[draft.id].message}</small>}
-                        {canWrite && !sendResults[draft.id] && ["ready", "order_pending", "error"].includes(draft.status) && <OmieActionButton disabled={sending} fulfillmentId={draft.id} kind="send" size="small" />}
+                        {canWrite && !draft.omie_order_id && !sendResults[draft.id] && ["ready", "order_pending", "error"].includes(draft.status) && <OmieActionButton disabled={sending} fulfillmentId={draft.id} kind="send" size="small" />}
                         {canWrite && (["order_created", "billing_pending", "billed"].includes(draft.status) || sendResults[draft.id]) && <OmieActionButton disabled={sending} fulfillmentId={draft.id} kind="sync-order" size="small" />}
                         {canWrite && !sending && draft.omie_order_id && ["order_created", "billing_pending"].includes(draft.status) && <>
                           {draft.omie_last_error?.startsWith("Frete: ") && <OmieActionButton fulfillmentId={draft.id} kind="select-mini" size="small" />}

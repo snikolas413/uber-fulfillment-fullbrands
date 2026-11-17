@@ -13,6 +13,7 @@ type PreparedItem = {
   line_total: number;
 };
 type PreparedRow = {
+  delivery_recipient_name?: string | null;
   id: string;
   customer_purchase_order: string | null;
   customer_email: string | null;
@@ -47,19 +48,19 @@ export default async function BillingPage() {
   const [preparedResult, pendingResult, billedResult] = await Promise.all([
     supabase
       .from("fulfillments")
-      .select("id, customer_purchase_order, customer_email, created_at, recipients(full_name), fulfillment_items(product_code, description, quantity, unit_price, line_total)")
+      .select("id, customer_purchase_order, customer_email, created_at, delivery_recipient_name,recipients(full_name), fulfillment_items(product_code, description, quantity, unit_price, line_total)")
       .eq("status", "ready")
       .order("created_at", { ascending: false })
       .limit(100),
     supabase
       .from("fulfillments")
-      .select("id, status, omie_order_id, omie_order_number, omie_last_error, created_at, recipients(full_name), invoices(omie_invoice_number, access_key, status, issued_at, danfe_url, xml_available), shipments(carrier_id, service_code, freight_amount)")
+      .select("id, status, omie_order_id, omie_order_number, omie_last_error, created_at, delivery_recipient_name,recipients(full_name), invoices(omie_invoice_number, access_key, status, issued_at, danfe_url, xml_available), shipments(carrier_id, service_code, freight_amount)")
       .in("status", ["order_created", "billing_pending"])
       .order("created_at", { ascending: true })
       .limit(100),
     supabase
       .from("fulfillments")
-      .select("id, status, omie_order_id, omie_order_number, omie_last_error, created_at, recipients(full_name), invoices(omie_invoice_number, access_key, status, issued_at, danfe_url, xml_available), shipments(carrier_id, service_code, freight_amount)")
+      .select("id, status, omie_order_id, omie_order_number, omie_last_error, created_at, delivery_recipient_name,recipients(full_name), invoices(omie_invoice_number, access_key, status, issued_at, danfe_url, xml_available), shipments(carrier_id, service_code, freight_amount)")
       .eq("status", "billed")
       .order("created_at", { ascending: false })
       .limit(100),
@@ -96,7 +97,7 @@ export default async function BillingPage() {
             <tbody>{preparedRows.map((row) => {
               const item = row.fulfillment_items?.[0];
               return <tr key={row.id}>
-                <td><strong>{row.recipients?.full_name ?? "Destinatário indisponível"}</strong><small>Pedido local · ainda não enviado</small></td>
+                <td><strong>{row.delivery_recipient_name ?? row.recipients?.full_name ?? "Destinatário indisponível"}</strong><small>Pedido local · ainda não enviado</small></td>
                 <td>{row.customer_purchase_order || "Não informada"}</td>
                 <td><span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Mail size={12} />{row.customer_email || "Não informado"}</span></td>
                 <td><strong>{item?.description ?? "Item não informado"}</strong><small>{item?.product_code ?? "—"} · {item?.quantity ?? 0} un.</small></td>

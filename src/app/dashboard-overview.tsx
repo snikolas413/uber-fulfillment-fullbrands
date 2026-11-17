@@ -3,6 +3,7 @@ import { ArrowRight, ArrowUpRight, CheckCheck, ClipboardCheck, Clock3, FileText,
 import styles from "./dashboard.module.css";
 
 export type RecentDashboardOrder = {
+  delivery_recipient_name?: string | null;
   id: string; status: string; created_at: string; omie_order_number: string | null;
   recipients: { full_name: string } | { full_name: string }[] | null;
   invoices: { omie_invoice_number: string | null } | { omie_invoice_number: string | null }[] | null;
@@ -64,7 +65,7 @@ export function DashboardOverview({ counts, recentOrders, recentFailed, dataLoad
         {recentFailed ? <div className={styles.empty}><AlertCircle size={27} /><strong>Consulta indisponível</strong><p>Não foi possível carregar os pedidos recentes. Recarregue a página para consultar novamente.</p></div> : recentOrders.length ? <div className={styles.tableWrap}><table className={styles.table}>
           <thead><tr><th>DESTINATÁRIO</th><th>PEDIDO / NF-E</th><th>SITUAÇÃO</th><th>REGISTRO</th></tr></thead>
           <tbody>{recentOrders.map(order => {
-            const recipient = first(order.recipients)?.full_name ?? "Destinatário indisponível";
+            const recipient = order.delivery_recipient_name ?? first(order.recipients)?.full_name ?? "Destinatário indisponível";
             const invoice = first(order.invoices)?.omie_invoice_number;
             const status = situations[order.status] ?? { label: "Em acompanhamento", tone: "neutral" };
             const created = new Date(order.created_at);

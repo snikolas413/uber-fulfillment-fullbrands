@@ -18,7 +18,7 @@ export default async function DashboardPage() {
       supabase.from("fulfillments").select("id", { count: "exact", head: true }).neq("status", "cancelled"),
       supabase.from("fulfillments").select("id", { count: "exact", head: true }).in("status", ["order_created", "billing_pending"]),
       supabase.from("fulfillments").select("id", { count: "exact", head: true }).eq("status", "shipped"),
-      supabase.from("fulfillments").select("id,status,created_at,omie_order_number,recipients(full_name),invoices(omie_invoice_number)")
+      supabase.from("fulfillments").select("id,status,created_at,omie_order_number,delivery_recipient_name,recipients(full_name),invoices(omie_invoice_number)")
         .order("created_at", { ascending: false }).limit(6),
     ]);
     counts.recipients = recipients.error ? null : recipients.count ?? 0;

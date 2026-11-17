@@ -8,7 +8,7 @@ export type OrderListState = {
   view: OrderView; search: string; page: number; pageCount: number; count: number; totals: OrderTotals;
 };
 
-const columns = "id, status, omie_order_id, omie_order_number, omie_last_error, customer_purchase_order, customer_email, created_at, recipients(full_name, email), delivery_addresses(city, state, postal_code), fulfillment_items(product_code, description, quantity, unit_price, line_total), shipments(carrier_id, package_count, freight_amount, estimated_delivery_date, service_modality)";
+const columns = "id, status, delivery_recipient_name, omie_order_id, omie_order_number, omie_last_error, customer_purchase_order, customer_email, created_at, recipients(full_name, email), delivery_addresses(city, state, postal_code), fulfillment_items(product_code, description, quantity, unit_price, line_total), shipments(carrier_id, package_count, freight_amount, estimated_delivery_date, service_modality)";
 
 export function orderListParams(params: Record<string, string | string[] | undefined>) {
   const view = ORDER_VIEWS.includes(params.view as OrderView) ? params.view as OrderView : "pending";
@@ -30,7 +30,7 @@ export function orderListQuery(client: SupabaseClient, view: OrderView, search =
   if (search && !head) {
     query = query.ilike("matching_recipient.full_name", `%${search}%`)
       .ilike("matching_item.product_code", `%${search}%`)
-      .or(`matching_recipient.not.is.null,matching_item.not.is.null,omie_order_number.ilike.%${search}%,customer_purchase_order.ilike.%${search}%,customer_email.ilike.%${search}%`);
+      .or(`matching_recipient.not.is.null,matching_item.not.is.null,delivery_recipient_name.ilike.%${search}%,omie_order_number.ilike.%${search}%,customer_purchase_order.ilike.%${search}%,customer_email.ilike.%${search}%`);
   }
   return query;
 }

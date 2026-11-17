@@ -11,6 +11,7 @@ import { isMiniEnviosName } from "@/lib/omie/freight-selection";
 type InvoiceRecord = { omie_invoice_number: string | null; access_key: string | null; status: string; issued_at: string | null; danfe_url: string | null; xml_available: boolean };
 type Shipment = { carrier_id: string | null; service_code: string | null; freight_amount: number | null };
 export type BillingRow = {
+  delivery_recipient_name?: string | null;
   id: string; status: string; omie_order_id: number | null; omie_order_number: string | null; omie_last_error: string | null;
   created_at: string; recipients: { full_name: string } | null;
   invoices: InvoiceRecord | InvoiceRecord[] | null; shipments: Shipment | Shipment[] | null;
@@ -103,7 +104,7 @@ export function BillingManagement({ rows, canBill }: { rows: BillingRow[]; canBi
             checked={selected.has(row.id) && !blocked} disabled={running || Boolean(blocked)} onChange={event => setSelected(previous => {
               const next = new Set(previous); if (event.target.checked) next.add(row.id); else next.delete(row.id); return next;
             })} /></td>}
-          <td><strong>{row.recipients?.full_name ?? "Destinatário indisponível"}</strong><small>{date(row.created_at)}</small></td>
+          <td><strong>{row.delivery_recipient_name ?? row.recipients?.full_name ?? "Destinatário indisponível"}</strong><small>{date(row.created_at)}</small></td>
           <td>{row.omie_order_number ? "#" + row.omie_order_number : "Aguardando número"}</td>
           <td><span className={`order-status order-status-${row.status}`}>{row.status === "billed" ? "Faturado" : invoice?.status.startsWith("billing_") && invoice.status !== "billing_rejected" ? "Conferir emissão" : "Aguardando faturamento"}</span></td>
           <td><strong>{invoice?.omie_invoice_number || "—"}</strong><small>{invoice?.danfe_url ? <a href={invoice.danfe_url} target="_blank" rel="noreferrer">Abrir DANFE</a> : "DANFE não disponível"}</small><small>{invoice?.xml_available ? "XML disponível no Omie" : "XML ainda não recebido"}</small></td>

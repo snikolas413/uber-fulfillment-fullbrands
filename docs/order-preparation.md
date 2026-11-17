@@ -31,7 +31,7 @@ separadas. Não é necessária alteração no esquema do banco.
 A tela abre em **Aguardando envio**, com pedidos preparados ainda sem vínculo no
 Omie. **Enviados ao Omie** reúne pedidos com ID Omie confirmado, inclusive os que
 avançaram para faturamento ou expedição. **Revisar** reúne tentativas pendentes ou
-com erro e sem ID Omie: confira usando **Atualizar Omie** antes de reenviar.
+com erro e sem ID Omie.
 **Cancelados sem envio** e **Todos** permitem consultar o restante do histórico.
 
 Os indicadores mostram os totais do banco, independentemente da página e da busca.
@@ -41,6 +41,31 @@ produto consulta todo o filtro escolhido, incluindo pedidos fora da página atua
 Mudar o filtro ou buscar reinicia a paginação e a seleção. O envio continua limitado
 a 100 pedidos por lote, com resultado por linha; navegar e buscar não enviam pedidos.
 Os controles de navegação e busca ficam bloqueados durante o envio.
+
+## Corrigir um pedido em Revisar
+
+Operadores, gestores e administradores podem clicar em **Editar pedido** nos
+pedidos em Revisar que ainda não têm vínculo com o Omie. O formulário carrega o
+endereço vinculado ao pedido, o nome de entrega e o e-mail para NF-e, junto do
+último erro. Nome, rua, bairro e complemento aceitam até 60 caracteres, número
+até 10, CEP com 8 dígitos e município sem UF. Confira os dados antes de salvar.
+
+**Salvar correções** cria uma nova versão do endereço e guarda nome e e-mail
+nesse pedido, com auditoria. O cadastro original e os demais pedidos são
+preservados. O endereço continua pendente de validação; a confirmação manual não
+declara uma validação postal. O erro anterior fica disponível como histórico.
+Salvar mantém o pedido em Revisar e não chama o Omie.
+
+Depois, feche a edição e clique individualmente em **Enviar ao Omie**. A ação
+consulta o código de integração antes de uma nova inclusão, recupera um pedido
+existente e pede confirmação separada quando não o encontra. Falhas de consulta
+bloqueiam a inclusão. Pedidos em Revisar continuam fora do envio em lote.
+Edições concorrentes são rejeitadas e o envio reserva o pedido para impedir
+correções durante a inclusão. Após uma interrupção, a reserva expira em 15 minutos;
+a próxima tentativa ainda reconcilia o código de integração antes de incluir.
+
+A publicação desta edição requer aplicar a migration
+`20261117122202_review_order_editing.sql` antes de publicar o código.
 
 ## Referências operacionais consultadas em 04/11/2026
 - Cliente Uber do Brasil Tecnologia Ltda., ID Omie `2867720329`.

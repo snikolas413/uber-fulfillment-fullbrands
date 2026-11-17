@@ -59,6 +59,7 @@ test('lista mostra seleção e botão de lote só para escrita; abrir página n�
     react: React, 'react/jsx-runtime': jsxRuntime, 'lucide-react': icons,
     'next/navigation': { useRouter: () => ({ refresh() {} }) },
     './order-batch-modal': { OrderBatchModal: () => null },
+    './order-review-editor': { OrderReviewEditor: ({ fulfillmentId }) => React.createElement('button', { 'data-review': fulfillmentId }, 'Editar pedido') },
     '@/components/omie-action-button': { OmieActionButton: () => null },
     '@/app/expedicao/shipping-editor': { ShippingEditor: () => null },
     './omie-actions': { sendOrderToOmieAction() { assert.fail('Renderização não pode enviar'); } },
@@ -77,7 +78,10 @@ test('lista mostra seleção e botão de lote só para escrita; abrir página n�
   assert.match(writable, /aria-label="Selecionar pedido de Pessoa 0"[^>]*\/?>/);
   assert.match(writable, /aria-label="Selecionar pedido de Pessoa 1"[^>]*disabled/);
   assert.match(writable, /aria-label="Selecionar pedido de Pessoa 2"[^>]*disabled/);
+  assert.match(writable, /data-review="1"/);
+  assert.doesNotMatch(writable, /data-review="[02]"/);
   const readonly = render(false);
   assert.ok(!readonly.includes('type="checkbox"'));
   assert.ok(!readonly.includes('Enviar selecionados ao Omie'));
+  assert.ok(!readonly.includes('Editar pedido'));
 });

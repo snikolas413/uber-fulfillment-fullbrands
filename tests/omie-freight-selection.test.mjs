@@ -129,6 +129,8 @@ function actionsStub(options = {}) {
   const writes = [], audits = [], shipments = [];
   const row = {
     id, status: options.status ?? 'ready', omie_order_id: options.status ? 555 : null,
+    updated_at: '2026-11-17T10:00:00Z', delivery_recipient_name: options.deliveryName,
+    omie_send_started_at: options.sending ? new Date().toISOString() : null,
     omie_last_error: options.freightError ?? null,
     omie_customer_id: 2867720329, omie_tax_scenario_id: 2954399884,
     customer_purchase_order: null, customer_email: 'teste@example.com',
@@ -141,9 +143,9 @@ function actionsStub(options = {}) {
     from(table) {
       let patch;
       const query = {
-        select() { return query; }, eq() { return query; },
+        select() { return query; }, eq() { return query; }, is() { return query; }, or() { return query; },
         update(value) { patch = value; writes.push(value); if (table === 'fulfillments') Object.assign(row, value); return query; },
-        async maybeSingle() { return { data: table === 'user_profiles' ? { role: options.role ?? 'operador', is_active: true } : patch ? { id } : row, error: null }; },
+        async maybeSingle() { return { data: table === 'user_profiles' ? { role: options.role ?? 'operador', is_active: true } : patch ? options.claimDenied ? null : { id } : row, error: null }; },
         async insert(value) { audits.push(value); return { error: null }; },
         async upsert(value) { shipments.push(value); return { error: options.localFailure ? { message: 'Falha local' } : null }; },
         then(resolve) { return Promise.resolve({ error: null }).then(resolve); },
@@ -190,6 +192,18 @@ test('criação segue referência 1107 com impostos completos, e-mail do destina
   assert.ok(calls.findIndex(call => call.method === 'IncluirPedido') < calls.findIndex(call => call.method === 'SelecionarFrete'));
   assert.equal(payload.cabecalho.etapa, '10');
   assert.ok(!calls.some(call => ['TrocarEtapaPedido', 'FaturarPedidoVenda', 'GerarFrete', 'GerarEtiqueta'].includes(call.method)));
+});
+
+test('envio usa nome corrigido do pedido e libera reserva; bloqueia envio ativo ou edição concorrente', async () => {
+  const corrected = actionsStub({ deliveryName: 'Nome corrigido para entrega' });
+  assert.equal((await corrected.actions.sendOrderToOmieAction(id)).status, 'success');
+  assert.equal(corrected.calls.find(call => call.method === 'IncluirPedido').params.informacoes_adicionais.outros_detalhes.cNomeOd, 'Nome corrigido para entrega');
+  assert.equal(corrected.writes.at(-1).omie_send_started_at, null);
+  for (const options of [{ sending: true }, { claimDenied: true }]) {
+    const blocked = actionsStub(options);
+    assert.equal((await blocked.actions.sendOrderToOmieAction(id)).status, 'warning');
+    assert.ok(!blocked.calls.some(call => call.method === 'IncluirPedido'));
+  }
 });
 
 test('envio pendente recupera pedido já incluído e termina o frete sem recriar ou mudar etapa', async () => {

@@ -22,7 +22,7 @@ export default async function ShippingPage() {
 
   const { data, error } = await supabase
     .from("fulfillments")
-    .select("id, status, created_at, recipients(full_name), delivery_addresses(city, state, postal_code), shipments(carrier_id, tracking_code, tracking_url, estimated_delivery_date, package_count, service_modality, status, label_storage_path, label_generation_state, freight_amount), invoices(omie_invoice_number, access_key, status)")
+    .select("id, status, created_at, delivery_recipient_name,recipients(full_name), delivery_addresses(city, state, postal_code), shipments(carrier_id, tracking_code, tracking_url, estimated_delivery_date, package_count, service_modality, status, label_storage_path, label_generation_state, freight_amount), invoices(omie_invoice_number, access_key, status)")
     .in("status", ["billing_pending", "billed", "shipping_pending", "label_ready", "shipped"])
     .order("created_at", { ascending: false })
     .limit(100);
