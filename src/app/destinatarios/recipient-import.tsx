@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Download, Upload, X } from "lucide-react";
 import { IMPORT_COLUMNS, MAX_IMPORT_ROWS, MAX_IMPORT_FILE_BYTES, IMPORT_BATCH_SIZE, IMPORT_PREVIEW_PAGE_SIZE, parseDelimited, rowsFromCells, validateImportRow, digitsOnly, buildImportReport, importReportCsv, type ImportRow, type ImportResult } from "@/lib/recipient-import";
@@ -25,8 +25,10 @@ export function RecipientImport({ existingDocuments }: { existingDocuments: stri
   const [inspections, setInspections] = useState<Record<number, ImportInspection>>({});
   const [progress, setProgress] = useState("");
   const [stopping, setStopping] = useState(false);
+  const [filter, setFilter] = useState<"all" | "ready" | "issues">("all");
   const stop = useRef(false);
   const running = useRef(false);
+  const { validation, done, eligible, report } = useMemo(() => {
   const existing = new Set(existingDocuments.map(digitsOnly));
   const seen = new Set<string>();
   const validation = rows.map(row => {
@@ -34,13 +36,18 @@ export function RecipientImport({ existingDocuments }: { existingDocuments: stri
     if (seen.has(row.cpf)) errors.push("CPF repetido no arquivo");
     seen.add(row.cpf);
     if (existing.has(row.cpf)) errors.push("CPF já cadastrado; esta linha não será importada");
-    if ((!inspections[row.line] || inspections[row.line].reviewRequired) && !row.review_confirmed) errors.push(inspections[row.line]?.warnings.join("; ") || "Confira o CEP ou confirme a revisão manual desta linha");
+    if (!inspections[row.line]) errors.push("Aguardando conferência automática do endereço");
+    else if (inspections[row.line].reviewRequired && !row.review_confirmed) errors.push((inspections[row.line].issues ?? inspections[row.line].warnings).join("; "));
     return errors;
   });
   const done = new Map(results.map(result => [result.line, result]));
   const eligible = rows.filter((row, index) => !validation[index].length && !["created", "skipped"].includes(done.get(row.line)?.status ?? ""));
   const report = buildImportReport(rows, validation, results);
-  const pageCount = Math.max(1, Math.ceil(rows.length / IMPORT_PREVIEW_PAGE_SIZE));
+  return {validation,done,eligible,report};
+  }, [rows, inspections, results, existingDocuments]);
+  const eligibleLines = new Set(eligible.map(row=>row.line));
+  const preview = rows.map((row,index)=>({row,index})).filter(({row,index})=>filter === "all" || (filter === "ready" ? eligibleLines.has(row.line) : validation[index].length > 0 || ["error","unconfirmed","not_processed"].includes(done.get(row.line)?.status ?? "")));
+  const pageCount = Math.max(1, Math.ceil(preview.length / IMPORT_PREVIEW_PAGE_SIZE));
   const currentPage = Math.min(page,pageCount);
   const offset = (currentPage-1)*IMPORT_PREVIEW_PAGE_SIZE;
 
@@ -63,16 +70,17 @@ export function RecipientImport({ existingDocuments }: { existingDocuments: stri
     }
   }
 
-  async function recheck() {
+  async function recheck(only?: ImportRow[]) {
     if (running.current) return;
     running.current=true; setBusy(true); setMessage("");
-    try { await inspect(rows.filter(row=>!["created","skipped"].includes(done.get(row.line)?.status ?? ""))); }
+    try { await inspect(only ?? rows.filter(row=>!["created","skipped"].includes(done.get(row.line)?.status ?? "") &&
+      (!inspections[row.line] || inspections[row.line].reviewRequired || inspections[row.line].warnings.some(warning=>warning.includes("indisponível"))))); }
     finally { running.current=false; setBusy(false); setStopping(false); }
   }
 
   async function load(file?: File) {
     if (!file || running.current) return;
-    running.current = true; setBusy(true); setRows([]); setResults([]); setInspections({}); setPage(1); setProgress(""); setMessage(""); setFileName(file.name);
+    running.current = true; setBusy(true); setRows([]); setResults([]); setInspections({}); setPage(1); setFilter("all"); setProgress(""); setMessage(""); setFileName(file.name);
     try {
       if (file.size > MAX_IMPORT_FILE_BYTES) throw new Error("O arquivo deve ter no máximo 10 MB.");
       let cells: unknown[][];
@@ -144,19 +152,25 @@ export function RecipientImport({ existingDocuments }: { existingDocuments: stri
           <p>O modelo usa as nove colunas do seu arquivo: <strong>cpf, full_name, phone_number, email, endereco, bairro, cidade, estado, codigo_postal</strong>. Preencha o endereço completo em <strong>endereco</strong>, por exemplo: Rua Afonso 13 casa 2. Revise a separação do endereço na prévia abaixo.</p>
           <div className="import-tools"><button type="button" className="secondary-button" onClick={downloadTemplate}>Baixar modelo CSV</button><label className="secondary-button">Selecionar arquivo<input aria-label="Arquivo de destinatários" type="file" accept=".xlsx,.csv,.tsv" disabled={busy} onChange={event => { void load(event.target.files?.[0]); event.target.value = ""; }} /></label>{!!rows.length && <button type="button" className="secondary-button" disabled={busy} onClick={()=>void recheck()}>Conferir endereços novamente</button>}{busy && <button type="button" className="secondary-button" disabled={stopping} onClick={()=>{stop.current=true;setStopping(true);}}>{stopping ? "Concluindo etapa atual…" : "Parar após etapa atual"}</button>}</div>
           {progress && <p role="status" aria-live="polite">{progress}</p>}
-          {fileName && <p>{fileName} · {rows.length} linha(s) · {eligible.length} apta(s) para importar</p>}
+          {fileName && <p>{fileName} · {rows.length} linha(s) · <strong>{eligible.length} pronta(s) para importar</strong> · {rows.filter(row=>inspections[row.line]?.reviewRequired && !row.review_confirmed).length} com divergência de endereço. Avisos de contato, bairro e consulta temporariamente indisponível não exigem confirmação manual.</p>}
           <p>CPFs existentes serão ignorados. Nenhum cadastro existente será atualizado. A validação de CPF confere o tamanho, sem verificar dígitos verificadores.</p>
           {message && <div className="recipient-alert" role="status">{message}</div>}
-          {!!report.length && <div className="recipient-alert import-report" role="status"><div><strong>{report.length} linha(s) com pendências</strong><p>O relatório inclui a linha do arquivo, os dados da prévia e o motivo do bloqueio ou da falha. Cadastros concluídos não entram no relatório.</p></div><button type="button" className="secondary-button" disabled={busy} onClick={downloadReport}><Download size={16} /> Baixar relatório de pendências (CSV)</button></div>}
+          {!busy && !!report.length && <div className="recipient-alert import-report" role="status"><div><strong>{report.length} linha(s) com pendências</strong><p>Importe as linhas prontas e trate apenas as pendências. CPFs existentes são ignorados, sem alterar o cadastro.</p></div><button type="button" className="secondary-button" disabled={busy} onClick={downloadReport}><Download size={16} /> Baixar relatório de pendências (CSV)</button></div>}
+          {!!rows.length && <div className="import-tools" role="group" aria-label="Filtrar prévia">{([['all','Todas'],['ready','Prontas para importar'],['issues','Somente pendências']] as const).map(([value,label])=><button key={value} type="button" className="secondary-button" aria-pressed={filter===value} onClick={()=>{setFilter(value);setPage(1);}}>{label}</button>)}</div>}
+          {!!rows.length && !preview.length && <p role="status">Nenhuma linha neste filtro.</p>}
           {!!rows.length && <div className="import-table-wrap"><table className="recipient-table import-table"><thead><tr><th>LINHA</th>{fields.map(([key, label]) => <th key={key}>{label}</th>)}<th>VALIDAÇÃO / RESULTADO</th></tr></thead><tbody>
-            {rows.slice(offset,offset+IMPORT_PREVIEW_PAGE_SIZE).map((row, index) => <tr key={row.line}><td>{row.line}</td>{fields.map(([key, label]) => <td key={key}><input aria-label={`${label}, linha ${row.line}`} value={row[key]} disabled={busy || ["created", "skipped"].includes(done.get(row.line)?.status ?? "")} onChange={event => {
+            {preview.slice(offset,offset+IMPORT_PREVIEW_PAGE_SIZE).map(({row,index}) => <tr key={row.line}><td>{row.line}</td>{fields.map(([key, label]) => <td key={key}><input aria-label={`${label}, linha ${row.line}`} value={row[key]} disabled={busy || ["created", "skipped"].includes(done.get(row.line)?.status ?? "")} onChange={event => {
               let value = event.target.value;
               if (["cpf", "phone_number", "codigo_postal"].includes(key)) value = digitsOnly(value);
               if (key === "estado") value = value.toUpperCase();
-              setRows(previous => previous.map(item => item.line === row.line ? { ...item, [key]: value, review_confirmed:false, normalization_notes:[] } : item));
-              setInspections(previous=>{const next={...previous};delete next[row.line];return next;});
+              const addressChanged = ["endereco","numero","complemento","bairro","cidade","estado","codigo_postal"].includes(key);
+              setRows(previous => previous.map(item => item.line === row.line ? { ...item, [key]: value, review_confirmed:addressChanged ? false : item.review_confirmed, normalization_notes:addressChanged ? [] : item.normalization_notes } : item));
+              if (addressChanged) setInspections(previous=>{const next={...previous};delete next[row.line];return next;});
               setResults(previous => previous.filter(item => item.line !== row.line));
-            }} /></td>)}<td className="import-result">{done.get(row.line)?.message ?? (validation[offset+index].join("; ") || "Pronto para importar")}<small>{row.normalization_notes?.join(" ")}</small><small>{inspections[row.line]?.warnings.join(" ")}</small>{(!inspections[row.line] || inspections[row.line]?.reviewRequired) && !["created","skipped"].includes(done.get(row.line)?.status ?? "") && <label><input type="checkbox" disabled={busy} checked={row.review_confirmed===true} onChange={event=>{const checked=event.target.checked;setRows(previous=>previous.map(item=>item.line===row.line?{...item,review_confirmed:checked}:item));setResults(previous=>previous.filter(item=>item.line!==row.line));}} /> Conferi manualmente os dados e as divergências desta linha</label>}</td></tr>)}
+            }} /></td>)}<td className="import-result">{done.get(row.line)?.message ?? (validation[index].join("; ") || "Pronto para importar")}
+              {!!(row.normalization_notes?.length || inspections[row.line]?.warnings.length) && <details><summary>Ver ajustes e avisos</summary><small>{row.normalization_notes?.join(" ")}</small><small>{inspections[row.line]?.warnings.join(" ")}</small></details>}
+              {!inspections[row.line] && <button type="button" className="secondary-button" disabled={busy} onClick={()=>void recheck([row])}>Conferir endereço</button>}
+              {inspections[row.line]?.reviewRequired && !["created","skipped"].includes(done.get(row.line)?.status ?? "") && <label><input type="checkbox" disabled={busy} checked={row.review_confirmed===true} onChange={event=>{const checked=event.target.checked;setRows(previous=>previous.map(item=>item.line===row.line?{...item,review_confirmed:checked}:item));setResults(previous=>previous.filter(item=>item.line!==row.line));}} /> Conferi a divergência real deste endereço</label>}</td></tr>)}
           </tbody></table></div>}
           {!!rows.length && <nav className="order-list-pagination" aria-label="Páginas da prévia"><button type="button" className="secondary-button" disabled={currentPage<=1} onClick={()=>setPage(currentPage-1)}>Anterior</button><span>Página {currentPage} de {pageCount} · {IMPORT_PREVIEW_PAGE_SIZE} linhas por página</span><button type="button" className="secondary-button" disabled={currentPage>=pageCount} onClick={()=>setPage(currentPage+1)}>Próxima</button></nav>}
           {!!results.length && <p role="status">{results.filter(result => result.status === "created").length} cadastrado(s), {report.length} linha(s) com pendências. Baixe o relatório para conferir os motivos.</p>}

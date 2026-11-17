@@ -19,12 +19,13 @@ test('consulta transmite apenas CEP e compartilha requisições em andamento e c
   assert.equal(calls[0].options.body,undefined);
   assert.equal(await lookup('05426200/../../bad'),null);assert.equal(calls.length,1);
 });
-test('não aceita CEP divergente, JSON inválido ou HTTP recusado; falhas não permanecem em cache',async()=>{
+test('não aceita CEP divergente, JSON inválido ou HTTP recusado e pausa consultas durante indisponibilidade',async()=>{
   for(const response of [{ok:false},{ok:true,json:async()=>({...postal,cep:'00000-000'})},{ok:true,json:async()=>null}]){
     let requests=0;
     const lookup=client(async()=>{requests++;return response;});
     await assert.rejects(lookup('05426200'));await assert.rejects(lookup('05426200'));
-    assert.equal(requests,2);
+    await assert.rejects(lookup('01001000'));
+    assert.equal(requests,1);
   }
   let requests=0;
   const lookup=client(async()=>{requests++;return {ok:true,json:async()=>({erro:true})};});

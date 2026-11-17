@@ -83,10 +83,14 @@ export function RecipientManagement({
   const [editing, setEditing] = useState<Recipient | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
   const visibleRecipients = useMemo(() => {
     return recipients.filter(recipient=>matchesRecipientSearch(recipient,search));
   }, [recipients, search]);
+  const pageCount = Math.max(1, Math.ceil(visibleRecipients.length / 50));
+  const currentPage = Math.min(page, pageCount);
+  const pageRecipients = visibleRecipients.slice((currentPage - 1) * 50, currentPage * 50);
 
   const addressCount = recipients.reduce((total, recipient) => total + (recipient.delivery_addresses?.length ?? 0), 0);
   const validatedCount = recipients.reduce(
@@ -130,7 +134,7 @@ export function RecipientManagement({
       <section className="panel recipient-panel">
         <div className="recipient-toolbar">
           <div><span className="section-kicker">CADASTRO INTERNO</span><h2>Base de motoristas</h2></div>
-          <label className="recipient-search"><Search size={16} /><input aria-label="Buscar destinatário" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome, CPF, telefone ou cidade" /></label>
+          <label className="recipient-search"><Search size={16} /><input aria-label="Buscar destinatário" value={search} onChange={(event) => {setSearch(event.target.value);setPage(1);}} placeholder="Buscar por nome, CPF, telefone ou cidade" /></label>
         </div>
         {loadError && <div className="recipient-alert recipient-alert-error">{loadError}</div>}
         {visibleRecipients.length > 0 ? (
@@ -138,7 +142,7 @@ export function RecipientManagement({
             <table className="recipient-table">
               <thead><tr><th>DESTINATÁRIO</th><th>CONTATO</th><th>ENDEREÇO MAIS RECENTE</th><th>CADASTRO</th><th /></tr></thead>
               <tbody>
-                {visibleRecipients.map((recipient) => {
+                {pageRecipients.map((recipient) => {
                   const currentAddress = latestAddress(recipient);
                   const addresses = [...(recipient.delivery_addresses ?? [])].sort(
                     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
@@ -192,7 +196,9 @@ export function RecipientManagement({
             {!search && canWrite && <button type="button" className="secondary-button" onClick={openNew}><Plus size={15} /> Cadastrar primeiro destinatário</button>}
           </div>
         )}
-        <div className="recipient-table-footer"><span>{visibleRecipients.length} de {recipients.length} destinatário(s)</span><span>Endereços anteriores são preservados no histórico.</span></div>
+        <div className="recipient-table-footer"><span>{visibleRecipients.length} de {recipients.length} destinatário(s) · 50 por página</span><nav className="order-list-pagination" aria-label="Páginas de destinatários">
+          <button type="button" className="secondary-button" disabled={currentPage<=1} onClick={()=>setPage(currentPage-1)}>Anterior</button><span>Página {currentPage} de {pageCount}</span><button type="button" className="secondary-button" disabled={currentPage>=pageCount} onClick={()=>setPage(currentPage+1)}>Próxima</button>
+        </nav></div>
       </section>
 
       {modalOpen && (

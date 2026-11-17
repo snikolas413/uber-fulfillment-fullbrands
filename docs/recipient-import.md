@@ -26,7 +26,7 @@ O importador remove espaços e caracteres invisíveis, reconhece UF por nome com
 separa município e UF (`São Gonçalo/RJ`), reconhece `nº`, `número`, `S/N`, números
 com letras e complementos como `ap`, `casa`, `bloco`, `lote` e `quadra`. Nomes com
 um trecho final duplicado de forma inequívoca são normalizados. Dados longos não
-são cortados; limites que podem causar rejeição no Omie geram avisos para revisão.
+são cortados; limites que podem causar rejeição no Omie geram avisos antes de preparar o pedido, sem bloquear o cadastro.
 
 Após a leitura, o servidor consulta o ViaCEP enviando somente o CEP. Município e UF
 são corrigidos quando a consulta e os dados informados são compatíveis. Bairro e
@@ -35,23 +35,38 @@ destacados. Número do imóvel nunca é inventado nem obtido por CEP. Não se tr
 de uma validação de que a residência existe: o endereço cadastrado continua pendente
 de validação.
 
-CEP inexistente, consulta indisponível ou divergências não descartam o arquivo.
-Corrija os campos e use **Conferir endereços novamente**, ou marque **Conferi
-manualmente os dados e as divergências desta linha** após verificar os dados.
-Essa confirmação não dispensa campos obrigatórios e formatos válidos. Alterar um
-campo invalida a confirmação e a conferência anteriores. A confirmação é individual,
-sem aprovação indiscriminada do arquivo. A prévia apresenta os ajustes e avisos;
-o servidor repete a normalização/conferência antes de gravar.
+A prévia separa **Todas**, **Prontas para importar** e **Somente pendências**.
+Avisos e ajustes automáticos ficam nos detalhes de cada linha. A confirmação
+manual aparece somente quando a consulta encontra conflito de rua, município/UF
+ou um CEP inexistente. Campos obrigatórios ausentes e formatos inválidos continuam
+exigindo correção e não podem ser liberados por uma caixa de confirmação.
 
-A consulta usa até quatro requisições simultâneas e compartilha resultados de CEPs
-repetidos em cache limitado, sem armazenar dados de destinatários nesse cache.
-O progresso aparece por etapa; **Parar após etapa atual** permite interromper a
-conferência ou o cadastro sem perder etapas concluídas. Arquivos grandes podem
-demorar mais conforme a quantidade de CEPs diferentes e a disponibilidade do serviço.
+Abreviações de logradouro e títulos, acentos e pequenas diferenças de grafia
+são comparados automaticamente. Diferenças de bairro são avisos, preservando o
+valor informado; não substituem a conferência de rua e município. Limites mais
+restritos do Omie são avisados no cadastro e continuam exigidos na preparação do
+pedido. Dados existentes não são sobrescritos pelo arquivo.
 
-CPFs repetidos no arquivo ficam bloqueados após a primeira ocorrência. CPFs já cadastrados são ignorados; o arquivo não atualiza cadastros existentes. A consulta ao banco é repetida no servidor antes de cada cadastro. Não há restrição única de CPF no modelo atual: a consulta não garante exclusão de duplicatas entre duas importações simultâneas. Evite importar o mesmo lote em sessões paralelas até a definição de uma regra global de unicidade.
+Se o serviço postal estiver temporariamente indisponível, a importação pode
+continuar quando os campos obrigatórios estiverem completos. O endereço permanece
+sem certificação postal, com aviso explícito; indisponibilidade não significa CEP
+inexistente. Após falhas, novas consultas externas ficam suspensas por 30 segundos
+para evitar repetir timeouts em todas as linhas. Consultas em andamento do mesmo
+CEP compartilham a requisição e respostas válidas ficam em cache por 24 horas.
 
-O navegador envia etapas de até 20 linhas. O servidor valida sessão, perfil ativo e permissão (`admin`, `gestor`, `operador`), valida os dados novamente e utiliza `save_recipient_with_address`, preservando RLS e auditoria. Cada destinatário e seu endereço são gravados na mesma transação da RPC existente. Uma falha não desfaz etapas já concluídas.
+São aceitas até 5000 linhas/10 MB, em etapas de 50 linhas. Cada etapa consulta os
+CPFs existentes em uma única operação e grava no máximo quatro destinatários
+distintos por vez, usando a RPC transacional já existente. A conferência postal
+também mantém no máximo quatro consultas simultâneas. A ordem dos resultados
+acompanha o arquivo. O servidor sempre refaz a validação, inclusive para linhas
+marcadas como revisadas na prévia.
+
+A prévia e a listagem de destinatários mostram 50 linhas por página. Editar contato
+não invalida a conferência do endereço. Editar endereço exige nova conferência,
+disponível na própria linha. A revisão em lote prioriza endereços ainda não
+conferidos, com conflito ou cuja consulta estava indisponível.
+
+Não há restrição única de CPF no modelo atual: a consulta agrupada não garante exclusão de duplicatas entre duas importações simultâneas do mesmo arquivo. O processamento dentro de uma etapa separa CPFs repetidos antes de gravar.
 
 O resultado mostra cadastros concluídos, ignorados e erros por linha. As linhas concluídas ficam bloqueadas para evitar reenvio pela mesma prévia. Em interrupções, confira o cadastro antes de continuar; a nova tentativa verifica novamente a existência do CPF. Arquivos são lidos no navegador; o arquivo original não é armazenado no servidor.
 

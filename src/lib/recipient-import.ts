@@ -18,7 +18,7 @@ export type ImportRow = {
 export const IMPORT_COLUMNS = ["cpf", "full_name", "phone_number", "email", "endereco", "bairro", "cidade", "estado", "codigo_postal"] as const;
 export const MAX_IMPORT_ROWS = 5000;
 export const MAX_IMPORT_FILE_BYTES = 10 * 1024 * 1024;
-export const IMPORT_BATCH_SIZE = 20;
+export const IMPORT_BATCH_SIZE = 50;
 export const IMPORT_PREVIEW_PAGE_SIZE = 50;
 export type ImportResult = {
   line: number;

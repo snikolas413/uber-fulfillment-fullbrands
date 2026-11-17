@@ -92,8 +92,9 @@ test('leitura de XLSX real mantém CPF e CEP textuais e usa a primeira aba', asy
   assert.deepEqual(validateImportRow(row), []);
 });
 
-function actionWithDatabase({ role = 'operador', active = true, user = true, failCpf = '', lookup = async cep=>({cep,logradouro:'Rua Afonso',bairro:'Pinheiros',localidade:'São Paulo',uf:'SP'}) } = {}) {
+function actionWithDatabase({ role = 'operador', active = true, user = true, failCpf = '', saveDelay = 0, lookup = async cep=>({cep,logradouro:'Rua Afonso',bairro:'Pinheiros',localidade:'São Paulo',uf:'SP'}) } = {}) {
   const saved = [], documents = new Set(), revalidated = [];
+  const stats = {lookups:0,active:0,maximum:0};
   const database = {
     auth: { getUser: async () => ({ data: { user: user ? { id: 'user-1' } : null }, error: null }) },
     from(table) {
@@ -101,6 +102,7 @@ function actionWithDatabase({ role = 'operador', active = true, user = true, fai
       const query = {
         select() { return query; },
         eq(key, value) { if (key === 'document_number') document = value; return query; },
+        async in(key, values) { assert.equal(table,'recipients');assert.equal(key,'document_number');stats.lookups++;return {data:[...documents].filter(value=>values.includes(value)).map(document_number=>({document_number})),error:null}; },
         async maybeSingle() { return { data: { role, is_active: active }, error: null }; },
         async limit() { assert.equal(table, 'recipients'); return { data: documents.has(document) ? [{ id: 'existing' }] : [], error: null }; },
       };
@@ -108,6 +110,9 @@ function actionWithDatabase({ role = 'operador', active = true, user = true, fai
     },
     async rpc(name, args) {
       assert.equal(name, 'save_recipient_with_address');
+      stats.active++;stats.maximum=Math.max(stats.maximum,stats.active);
+      if(saveDelay) await new Promise(resolve=>setTimeout(resolve,saveDelay));
+      stats.active--;
       if (args.p_document_number === failCpf) return { error: { message: 'database failure' } };
       saved.push(args); documents.add(args.p_document_number);
       return { data: 'recipient-1', error: null };
@@ -124,7 +129,7 @@ function actionWithDatabase({ role = 'operador', active = true, user = true, fai
     throw new Error(`Unexpected module: ${name}`);
   };
   new Function('require', 'exports', code)(require, exports);
-  return { action: exports.importRecipientsAction, inspect: exports.inspectImportAddressesAction, saved, revalidated };
+  return { action: exports.importRecipientsAction, inspect: exports.inspectImportAddressesAction, saved, revalidated, stats };
 }
 
 test('normaliza número marcado, sem número, cidade com UF, nome duplicado e CEP numérico', () => {
@@ -158,18 +163,23 @@ test('CEP corrige município e UF inequívocos sem sobrescrever rua, bairro e n�
   assert.equal(ambiguous.reviewRequired,true); assert.match(ambiguous.warnings.join(' '),/Município divergente/);
 });
 
-test('CEP completa bairro e município ausentes; indisponibilidade permite revisão manual sem validar como correto', async () => {
+test('CEP completa bairro e município; CEP inexistente exige revisão e indisponibilidade gera apenas aviso', async () => {
   const [base] = rowsFromCells([IMPORT_COLUMNS,values]);
   const result = await addressTools.inspectImportAddress({...base,bairro:'',cidade:'',estado:'',email:'',phone_number:''},async()=>({cep:base.codigo_postal,logradouro:base.endereco,bairro:'Pinheiros',localidade:'São Paulo',uf:'SP'}));
   assert.equal(result.row.bairro,'Pinheiros'); assert.equal(result.row.cidade,'São Paulo');
   assert.equal(result.reviewRequired,false); assert.ok(result.warnings.length>=2);
-  for (const lookup of [async()=>null,async()=>{throw new Error('offline');}]) {
+  for (const lookup of [async()=>null]) {
     const inspection = await addressTools.inspectImportAddress(base,lookup);
     assert.equal(inspection.reviewRequired,true); assert.equal(inspection.row.numero,base.numero);
     const db = actionWithDatabase({lookup});
     assert.equal((await db.action([base]))[0].status,'error');
     assert.equal((await db.action([{...base,review_confirmed:true}]))[0].status,'created');
   }
+  const lookup=async()=>{throw new Error('offline');};
+  const inspection=await addressTools.inspectImportAddress(base,lookup);
+  assert.equal(inspection.reviewRequired,false);
+  assert.match(inspection.warnings.join(' '),/permanece sem conferência/);
+  assert.equal((await actionWithDatabase({lookup}).action([base]))[0].status,'created');
 });
 
 test('servidor refaz normalização postal e exige confirmação para conflitos sem confiar na prévia', async () => {
@@ -192,7 +202,7 @@ test('conferência de CEP exige autenticação e limita concorrência a quatro c
   const rows=Array.from({length:20},(_,i)=>({...base,line:i+2}));
   assert.equal((await db.inspect(rows)).length,20); assert.equal(maximum,4); assert.equal(db.saved.length,0);
   await assert.rejects(actionWithDatabase({role:'consulta'}).inspect(rows));
-  await assert.rejects(db.inspect([...rows,base]),/20 linhas/);
+  await assert.rejects(db.inspect(Array(51).fill(base)),/50 linhas/);
 });
 
 test('prévia de 5000 linhas renderiza só a página de 50 linhas, com navegação e progresso', () => {
@@ -217,7 +227,7 @@ test('servidor bloqueia sessão ausente, perfil inativo, consulta e etapas grand
     const { action, saved } = actionWithDatabase(options);
     await assert.rejects(action([row])); assert.equal(saved.length, 0);
   }
-  await assert.rejects(actionWithDatabase().action(Array(21).fill(row)), /20 linhas/);
+  await assert.rejects(actionWithDatabase().action(Array(51).fill(row)), /50 linhas/);
 });
 
 test('servidor preserva campos e ignora CPF repetido ou reenviado', async () => {
@@ -237,6 +247,58 @@ test('servidor revalida campos e continua após erro de uma linha', async () => 
   const results = await action([row, { ...row, line: 3, cpf: '12345678901' }, { ...row, line: 4, cpf: '123' }]);
   assert.deepEqual(results.map(result => result.status), ['error', 'created', 'error']);
   assert.equal(saved.length, 1);
+});
+
+test('bairro alternativo e abreviações não pedem revisão; conflitos de rua e cidade continuam separados', async () => {
+  const [base]=rowsFromCells([IMPORT_COLUMNS,values]);
+  const lookup=async()=>({cep:base.codigo_postal,logradouro:'Rua Doutor Afonso',bairro:'Jardim Pinheiros',localidade:'São Paulo',uf:'SP'});
+  const compatible=await addressTools.inspectImportAddress({...base,endereco:'R. Dr. Afonso',bairro:'Pinheiros'},lookup);
+  assert.equal(compatible.reviewRequired,false);
+  assert.equal(compatible.row.bairro,'Pinheiros');
+  assert.match(compatible.warnings.join(' '),/Bairro informado preservado/);
+  const conflict=await addressTools.inspectImportAddress({...base,endereco:'Rua completamente diferente',cidade:'Cajamar'},lookup);
+  assert.equal(conflict.reviewRequired,true);
+  const wrongState=await addressTools.inspectImportAddress({...base,endereco:'R. Dr. Afonso',cidade:'Curitiba',estado:'PR'},lookup);
+  assert.equal(wrongState.reviewRequired,true);
+  assert.equal(wrongState.row.cidade,'Curitiba');
+  const longName=await addressTools.inspectImportAddress({...base,endereco:'R. Dr. Afonso',full_name:'Nome '.repeat(14).trim()},lookup);
+  assert.equal(longName.reviewRequired,false);
+});
+
+test('50 linhas usam uma consulta de CPFs e no máximo quatro gravações simultâneas, preservando ordem', async () => {
+  const [base]=rowsFromCells([IMPORT_COLUMNS,values]);
+  const db=actionWithDatabase({saveDelay:2});
+  const rows=Array.from({length:50},(_,i)=>({...base,line:i+2,cpf:String(i).padStart(11,'0')}));
+  const results=await db.action(rows);
+  assert.equal(db.stats.lookups,1);
+  assert.equal(db.stats.maximum,4);
+  assert.equal(db.saved.length,50);
+  assert.deepEqual(results.map(item=>item.line),rows.map(item=>item.line));
+  assert.ok(results.every(item=>item.status==='created'));
+  assert.equal((await db.action(rows))[0].status,'skipped');
+  assert.equal(db.saved.length,50);
+});
+
+test('prévia separa linhas prontas das pendências e só mostra confirmação manual para conflito real', () => {
+  const [base]=rowsFromCells([IMPORT_COLUMNS,values]);
+  const rows=[base,{...base,line:3,cpf:'12345678901'},{...base,line:4,cpf:'23456789012'}];
+  const inspections={2:{row:base,warnings:['Consulta temporariamente indisponível'],reviewRequired:false},3:{row:rows[1],warnings:['Rua divergente'],issues:['Rua divergente'],reviewRequired:true}};
+  function render(filter) {
+    let index=0;
+    const state=[true,rows,[],'',false,'arquivo.csv',1,inspections,'',false,filter];
+    const exports={};
+    const code=ts.transpileModule(readFileSync(new URL('../src/app/destinatarios/recipient-import.tsx',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
+    const modules={react:{...React,useState(initial){const actual=React.useState(initial);return [state[index++]??actual[0],actual[1]];}},'react/jsx-runtime':jsxRuntime,'lucide-react':icons,'next/navigation':{useRouter:()=>({refresh(){}})},'@/lib/recipient-import':importTools,'./import-actions':{}};
+    new Function('require','exports',code)(name=>modules[name],exports);
+    return renderToStaticMarkup(React.createElement(exports.RecipientImport,{existingDocuments:[]}));
+  }
+  const ready=render('ready');
+  assert.match(ready,/Nome, linha 2/);assert.doesNotMatch(ready,/Nome, linha 3/);
+  assert.doesNotMatch(ready,/type="checkbox"/);
+  const issues=render('issues');
+  assert.doesNotMatch(issues,/Nome, linha 2/);assert.match(issues,/Nome, linha 3/);
+  assert.match(issues,/Nome, linha 4/);assert.match(issues,/Conferir endereço/);
+  assert.equal((issues.match(/type="checkbox"/g)||[]).length,1);
 });
 
 test('relatório inclui CPF curto e exclui o registro cadastrado, mesmo após atualizar a listagem', () => {
