@@ -81,17 +81,18 @@ const identifierDigits = (value: string) => {
 
 const addressPunctuation = (value: string) => value
   .replace(/[\u2010-\u2015\u2212\ufe63\uff0d]/g, "-")
+  .replace(/（/g, "(").replace(/）/g, ")")
   .replace(/[０-９]/g, digit => String(digit.charCodeAt(0) - 0xff10));
 const houseNumber = "(?:\\d+(?:\\s*[-/.]\\s*\\d+)*(?:\\s*[-/]?\\s*[A-Za-z])?|s\\s*[/.\\-]?\\s*n[º°.]?|sem\\s+n[úu]mero)";
 const numberMarker = "(?:n[úu]mero|n\\.?\\s*[º°o]|n\\.|n(?=\\s*[:#]?\\s*\\d)|#|№)";
 const numberPattern = new RegExp("^" + houseNumber + "$", "i");
 const numberPrefix = new RegExp("^" + numberMarker + "\\s*[:#]?\\s*(?=" + houseNumber + "$)", "i");
-const addressTail = "(?:[,;|•·\\s]+(.*))?$";
+const addressTail = "(?:(?:[,;|•·\\s]+|(?=\\())(.*))?$";
 const addressNumberPatterns = [
   new RegExp("^(.+?)[,;|•·\\s-]+" + numberMarker + "\\s*[:.#]?\\s*(" + houseNumber + ")" + addressTail, "i"),
   new RegExp("^(.+?)[,;|•·:]\\s*(" + houseNumber + ")" + addressTail, "i"),
   new RegExp("^(.+?)\\s+-\\s*(" + houseNumber + ")" + addressTail, "i"),
-  new RegExp("^(.+?)\\s+(" + houseNumber + ")(?:[,;|•·\\s]+((?:casa|ap(?:to?)?|apartamento|bl(?:oco)?|fundos|sala|lt|lote|qd|quadra|complemento)\\b.*))?$", "i"),
+  new RegExp("^(.+?)\\s+(" + houseNumber + ")(?:(?:[,;|•·\\s]+|(?=\\())((?:casa|ap(?:to?)?|apartamento|bl(?:oco)?|fundos|sala|lt|lote|qd|quadra|complemento)\\b.*|\\(.*))?$", "i"),
 ];
 function normalizeHouseNumber(value: string) {
   let number = addressPunctuation(value).trim();
@@ -104,6 +105,7 @@ export function normalizeImportRow(input: ImportRow): ImportRow {
   const row = { ...input };
   const notes = new Set((Array.isArray(input.normalization_notes) ? input.normalization_notes : []).filter(note => typeof note === "string"));
   for (const key of ["full_name","phone_number","email","endereco","numero","complemento","bairro","cidade","estado","codigo_postal","cpf"] as const) row[key] = clean(row[key]);
+  row.complemento = clean(row.complemento.replace(/[()（）]/g, " "));
   row.cpf = identifierDigits(row.cpf);
   if (row.cpf.length === 10) { row.cpf = "0" + row.cpf; notes.add("CPF completado com zero à esquerda."); }
   row.codigo_postal = identifierDigits(row.codigo_postal);
@@ -131,7 +133,8 @@ export function normalizeImportRow(input: ImportRow): ImportRow {
     const street = match?.[1].replace(/[,;|•·:\s-]+$/, "");
     if (match && street && !/^(rua|r|avenida|av|estrada|travessa|tv|alameda|praca|rodovia|br)$/i.test(street) && !states.has(street.toUpperCase()) && !/\b(?:km|quil[oô]metro)$/i.test(street) && (!row.numero || row.numero.toUpperCase() === normalizeHouseNumber(match[2]).toUpperCase())) {
       row.endereco = street; row.numero = row.numero || normalizeHouseNumber(match[2]);
-      if (match[3] && normalizeText(match[3]) !== normalizeText(row.complemento)) row.complemento = [row.complemento, match[3]].filter(Boolean).join(" · ");
+      const complement = clean((match[3] ?? "").replace(/[()（）]/g, " "));
+      if (complement && normalizeText(complement) !== normalizeText(row.complemento)) row.complemento = [row.complemento, complement].filter(Boolean).join(" · ");
       notes.add("Logradouro, número e complemento separados; confira a prévia.");
     }
   }

@@ -39,15 +39,19 @@ um trecho final duplicado de forma inequívoca são normalizados. Dados longos n
 são cortados; limites que podem causar rejeição no Omie geram avisos antes de preparar o pedido, sem bloquear o cadastro.
 
 Após a leitura, o servidor consulta o ViaCEP enviando somente o CEP. Município e UF
-são corrigidos quando a consulta e os dados informados são compatíveis. Bairro e
-logradouro vazios podem ser preenchidos; valores divergentes são preservados e
-destacados. Número do imóvel nunca é inventado nem obtido por CEP. Não se trata
+são corrigidos quando a consulta e os dados informados são compatíveis. O nome
+do logradouro é substituído pelo informado pelo CEP, quando disponível, inclusive
+em caso de divergência; o número e o complemento do arquivo são preservados.
+Um CEP genérico sem logradouro não substitui o nome da rua. Bairro vazio pode
+ser preenchido; bairro divergente é preservado e destacado. Número do imóvel
+nunca é inventado nem obtido por CEP. Não se trata
 de uma validação de que a residência existe: o endereço cadastrado continua pendente
 de validação.
 
 A prévia separa **Todas**, **Prontas para importar** e **Somente pendências**.
-Avisos e ajustes automáticos ficam nos detalhes de cada linha. A confirmação
-manual aparece somente quando a consulta encontra conflito de rua, município/UF
+Avisos e ajustes automáticos ficam nos detalhes das linhas com pendências; linhas
+liberadas mostram apenas **Pronto para importar**. A confirmação
+manual aparece somente quando a consulta encontra conflito de município/UF
 ou um CEP inexistente. Campos obrigatórios ausentes e formatos inválidos continuam
 exigindo correção e não podem ser liberados por uma caixa de confirmação.
 
@@ -75,6 +79,12 @@ A prévia e a listagem de destinatários mostram 50 linhas por página. Editar c
 não invalida a conferência do endereço. Editar endereço exige nova conferência,
 disponível na própria linha. A revisão em lote prioriza endereços ainda não
 conferidos, com conflito ou cuja consulta estava indisponível.
+
+Trechos entre parênteses depois do número são tratados como complemento, com o
+conteúdo preservado e os parênteses removidos. Exemplo: `R. Belo Horizonte 837
+(Condomínio Viva a Vida ALEGRIA)` resulta no logradouro do CEP, número `837` e
+complemento `Condomínio Viva a Vida ALEGRIA`. A regra também aceita parênteses
+junto ao número e mantém complementos já preenchidos em coluna própria.
 
 Não há restrição única de CPF no modelo atual: a consulta agrupada não garante exclusão de duplicatas entre duas importações simultâneas do mesmo arquivo. O processamento dentro de uma etapa separa CPFs repetidos antes de gravar.
 

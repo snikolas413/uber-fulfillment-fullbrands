@@ -46,7 +46,11 @@ export async function inspectImportAddress(input: ImportRow, lookup: PostalLooku
   } else review(`Município divergente do CEP: arquivo ${row.cidade}/${row.estado}; consulta ${postal.localidade}/${postal.uf}. Corrija a cidade ou o CEP.`);
   if (!row.bairro && postal.bairro) { row.bairro = postal.bairro; row.normalization_notes?.push("Bairro preenchido pela consulta de CEP."); }
   else if (postal.bairro && normalizeText(row.bairro) !== normalizeText(postal.bairro) && !normalizeText(postal.bairro).startsWith(normalizeText(row.bairro)+" ")) warnings.push(`Bairro informado preservado: ${row.bairro}. Referência do CEP: ${postal.bairro}.`);
-  if (!row.endereco && postal.logradouro) { row.endereco = postal.logradouro; row.normalization_notes?.push("Logradouro preenchido pela consulta de CEP."); }
-  else if (postal.logradouro && !matchingStreet) review(`Logradouro divergente: arquivo ${row.endereco}; CEP ${postal.logradouro}.`);
+  // The uploaded CEP is the user's source of truth for the street name.
+  // Number/complement were extracted above and must never come from the postal service.
+  if (postal.logradouro.trim() && row.endereco !== postal.logradouro.trim()) {
+    row.normalization_notes?.push(`Logradouro ajustado pelo CEP: ${row.endereco || "não informado"} → ${postal.logradouro.trim()}. Número e complemento preservados.`);
+    row.endereco = postal.logradouro.trim();
+  }
   return {row,warnings,reviewRequired,issues};
 }

@@ -187,13 +187,14 @@ test('aceita aliases de cabeçalho e contatos opcionais, mas não inventa númer
   assert.equal(normalizeImportRow({...row,numero:'',endereco:'Rua sem identificação'}).numero,'');
 });
 
-test('CEP corrige município e UF inequívocos sem sobrescrever rua, bairro e número divergentes', async () => {
+test('CEP define logradouro e preserva número; município incompatível continua exigindo conferência', async () => {
   const [base] = rowsFromCells([IMPORT_COLUMNS,values]);
   const postal = async()=>({cep:'07792390',logradouro:'Rua Gilberto Carvalho',bairro:'Panorama (Polvilho)',localidade:'Cajamar',uf:'SP'});
   const result = await addressTools.inspectImportAddress({...base,cidade:'Cajamar',estado:'RJ',endereco:'Rua Gilberto Carvalho',bairro:'Panorama (Polvilho)'},postal);
   assert.equal(result.row.estado,'SP'); assert.equal(result.row.numero,'13'); assert.equal(result.reviewRequired,false);
   const ambiguous = await addressTools.inspectImportAddress({...base,cidade:'São Paulo',estado:'SP'},postal);
-  assert.equal(ambiguous.row.cidade,'São Paulo'); assert.equal(ambiguous.row.endereco,base.endereco);
+  assert.equal(ambiguous.row.cidade,'São Paulo'); assert.equal(ambiguous.row.endereco,'Rua Gilberto Carvalho');
+  assert.equal(ambiguous.row.numero,base.numero);
   assert.equal(ambiguous.reviewRequired,true); assert.match(ambiguous.warnings.join(' '),/Município divergente/);
 });
 
@@ -223,10 +224,49 @@ test('servidor refaz normalização postal e exige confirmação para conflitos 
   assert.equal(result[0].status,'created'); assert.equal(db.saved[0].p_state,'SP');
   assert.equal(db.saved[0].p_email,null); assert.equal(db.saved[0].p_phone,null);
   const conflict=actionWithDatabase();
-  const row={...base,endereco:'Rua completamente diferente',normalization_notes:['CEP conferido']};
+  const row={...base,endereco:'Rua completamente diferente',cidade:'Curitiba',estado:'PR',normalization_notes:['CEP conferido']};
   assert.equal((await conflict.action([row]))[0].status,'error'); assert.equal(conflict.saved.length,0);
   assert.equal((await conflict.action([{...row,review_confirmed:true}]))[0].status,'created');
-  assert.equal(conflict.saved[0].p_street,row.endereco);
+  assert.equal(conflict.saved[0].p_street,'Rua Afonso');
+  assert.equal(conflict.saved[0].p_number,row.numero);
+});
+
+test('exemplo Belo Horizonte separa 837 e condomínio entre parênteses e grava o logradouro do CEP', async () => {
+  const [base]=rowsFromCells([IMPORT_COLUMNS,values]);
+  const lookup=async()=>({cep:base.codigo_postal,logradouro:'Rua Belo Horizonte',bairro:'Centro',localidade:'São Paulo',uf:'SP'});
+  for(const address of [
+    'R. Belo Horizonte 837 ( Condomínio Viva a Vida ALEGRIA )',
+    'R. Belo Horizonte 837(Condomínio Viva a Vida ALEGRIA)',
+    'R. Belo Horizonte, nº 837 ( Condomínio Viva a Vida ALEGRIA )',
+  ]) {
+    const row={...base,endereco:address,numero:'',complemento:''};
+    const result=await addressTools.inspectImportAddress(row,lookup);
+    assert.equal(result.row.endereco,'Rua Belo Horizonte',address);
+    assert.equal(result.row.numero,'837',address);
+    assert.equal(result.row.complemento,'Condomínio Viva a Vida ALEGRIA',address);
+    assert.equal(result.reviewRequired,false,address);
+    assert.deepEqual(validateImportRow(result.row),[],address);
+    const db=actionWithDatabase({lookup});
+    assert.equal((await db.action([row]))[0].status,'created');
+    assert.equal(db.saved[0].p_street,'Rua Belo Horizonte');
+    assert.equal(db.saved[0].p_number,'837');
+    assert.equal(db.saved[0].p_complement,'Condomínio Viva a Vida ALEGRIA');
+  }
+});
+
+test('rua divergente é substituída pela do CEP, preservando número composto e complemento existente', async () => {
+  const [base]=rowsFromCells([IMPORT_COLUMNS,values]);
+  const lookup=async()=>({cep:base.codigo_postal,logradouro:'Rua Oficial do CEP',bairro:base.bairro,localidade:base.cidade,uf:base.estado});
+  const result=await addressTools.inspectImportAddress({...base,endereco:'Rua diferente 0012/A (Condomínio (Torre A)) apto 4',numero:'',complemento:'(Casa 2)'},lookup);
+  assert.equal(result.row.endereco,'Rua Oficial do CEP');
+  assert.equal(result.row.numero,'0012/A');
+  assert.equal(result.row.complemento,'Casa 2 · Condomínio Torre A apto 4');
+  assert.equal(result.reviewRequired,false);
+  const again=await addressTools.inspectImportAddress(result.row,lookup);
+  assert.equal(again.row.complemento,result.row.complemento);
+  assert.equal(again.row.numero,result.row.numero);
+  const generic=await addressTools.inspectImportAddress({...base,endereco:'Rua diferente'},async()=>({...await lookup(),logradouro:''}));
+  assert.equal(generic.row.endereco,'Rua diferente');
 });
 
 test('conferência de CEP exige autenticação e limita concorrência a quatro consultas', async () => {
