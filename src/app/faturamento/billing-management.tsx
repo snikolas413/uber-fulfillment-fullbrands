@@ -7,6 +7,7 @@ import { invoiceOrderAction } from "@/app/pedidos/omie-actions";
 import { OmieActionButton } from "@/components/omie-action-button";
 import { runBillingBatch } from "@/lib/omie/billing-batch";
 import { isMiniEnviosName } from "@/lib/omie/freight-selection";
+import { billingPageUrl, type BillingListState } from "@/lib/billing-list";
 
 type InvoiceRecord = { omie_invoice_number: string | null; access_key: string | null; status: string; issued_at: string | null; danfe_url: string | null; xml_available: boolean };
 type Shipment = { carrier_id: string | null; service_code: string | null; freight_amount: number | null };
@@ -33,7 +34,7 @@ function blockedReason(row: BillingRow, result?: Result) {
   return null;
 }
 
-export function BillingManagement({ rows, canBill }: { rows: BillingRow[]; canBill: boolean }) {
+export function BillingManagement({ rows, canBill, list }: { rows: BillingRow[]; canBill: boolean; list: BillingListState }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [results, setResults] = useState<Record<string, Result>>({});
@@ -49,6 +50,7 @@ export function BillingManagement({ rows, canBill }: { rows: BillingRow[]; canBi
   const batchResults = batchIds.flatMap(id => results[id] ? [results[id]] : []);
   const completed = batchResults.length;
   const confirmed = batchResults.filter(result => result.billingOutcome === "confirmed").length;
+  const pages = { prepared: list.prepared.page, pending: list.pending.page, billed: list.billed.page };
 
   async function run() {
     if (!canBill || runningRef.current || !selectedRows.length || selectedRows.length > 100) return;
@@ -119,6 +121,14 @@ export function BillingManagement({ rows, canBill }: { rows: BillingRow[]; canBi
         </tr>;
       })}</tbody>
     </table></div> : <div className="recipient-empty"><span className="recipient-empty-icon"><FileText size={24} /></span><strong>Nenhum pedido aguardando faturamento</strong><p>Envie os pedidos preparados ao Omie para selecioná-los nesta fila.</p></div>}
-    <div className="recipient-table-footer"><span>Até 100 pendentes por lote e 100 faturados recentes. A fila carrega os próximos pendentes ao atualizar.</span><span>Uma falha não interrompe os demais pedidos. Emissões sem confirmação não são reenviadas automaticamente.</span></div>
+    {(["pending", "billed"] as const).map(queue => <div className="recipient-table-footer" key={queue}>
+      <span>{queue === "pending" ? "Pendentes" : "Faturados"}: {rows.filter(row => queue === "pending" ? row.status !== "billed" : row.status === "billed").length} de {list[queue].count} pedido(s)</span>
+      <nav aria-label={queue === "pending" ? "Páginas de pedidos pendentes" : "Páginas de pedidos faturados"} className="order-list-pagination">
+        <button type="button" className="secondary-button" disabled={running || list[queue].page <= 1} onClick={() => router.push(billingPageUrl(pages, queue, list[queue].page - 1))}>Anterior</button>
+        <span>Página {list[queue].page} de {list[queue].pageCount}</span>
+        <button type="button" className="secondary-button" disabled={running || list[queue].page >= list[queue].pageCount} onClick={() => router.push(billingPageUrl(pages, queue, list[queue].page + 1))}>Próxima</button>
+      </nav>
+    </div>)}
+    <div className="recipient-table-footer"><span>Selecione até 100 pedidos da página atual por lote.</span><span>Emissões sem confirmação não são reenviadas automaticamente.</span></div>
   </section>;
 }

@@ -20,13 +20,15 @@ const { BillingManagement } = load('../src/app/faturamento/billing-management.ts
   '@/components/omie-action-button': { OmieActionButton: () => React.createElement('button', null, 'Atualizar Omie') },
   '@/lib/omie/billing-batch': load('../src/lib/omie/billing-batch.ts'),
   '@/lib/omie/freight-selection': load('../src/lib/omie/freight-selection.ts'),
+  '@/lib/billing-list': load('../src/lib/billing-list.ts'),
 });
+const list = { prepared: { page: 1, pageCount: 1, count: 0 }, pending: { page: 1, pageCount: 10, count: 1000 }, billed: { page: 1, pageCount: 1, count: 0 } };
 const base = { id: 'pedido-1', status: 'order_created', omie_order_id: 555, omie_order_number: '1140', omie_last_error: null,
   created_at: '2026-11-10T12:00:00Z', recipients: { full_name: 'Destinatário teste' }, invoices: null,
   shipments: { carrier_id: '123', service_code: '04227', freight_amount: 0 } };
 
 test('tela permite selecionar pedido preparado e bloqueia NF existente, tentativa incerta e frete pendente', () => {
-  const html = renderToStaticMarkup(React.createElement(BillingManagement, { canBill: true, rows: [base,
+  const html = renderToStaticMarkup(React.createElement(BillingManagement, { canBill: true, list, rows: [base,
     { ...base, id: 'pedido-2', omie_order_number: '1141', invoices: { status: 'billing_unknown' } },
     { ...base, id: 'pedido-3', omie_order_number: '1142', invoices: { omie_invoice_number: '123', status: 'faturada' } },
     { ...base, id: 'pedido-4', omie_order_number: '1143', omie_last_error: 'Frete: Pendente' },
@@ -36,10 +38,13 @@ test('tela permite selecionar pedido preparado e bloqueia NF existente, tentativ
   assert.ok(!inputs.find(input => input.includes('Selecionar pedido 1140')).includes('disabled'));
   for (const number of ['1141', '1142', '1143']) assert.ok(inputs.find(input => input.includes('Selecionar pedido ' + number)).includes('disabled'));
   assert.match(html, /Faturar selecionados/);
+  assert.match(html, /Pendentes: 4 de 1000 pedido/);
+  assert.match(html, /Página 1 de 10/);
+  assert.match(html, /Páginas de pedidos pendentes/);
 });
 
 test('perfil consulta não recebe controles de seleção ou emissão', () => {
-  const html = renderToStaticMarkup(React.createElement(BillingManagement, { canBill: false, rows: [base] }));
+  const html = renderToStaticMarkup(React.createElement(BillingManagement, { canBill: false, list, rows: [base] }));
   assert.ok(!html.includes('type="checkbox"'));
   assert.ok(!html.includes('Faturar selecionados'));
   assert.match(html, /Atualizar Omie/);

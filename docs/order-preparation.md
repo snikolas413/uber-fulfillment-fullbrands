@@ -99,6 +99,14 @@ O faturamento ocorre por ação separada com confirmação explícita na aba **F
 
 Ao clicar em **Enviar ao Omie**, a aplicação resolve o cadastro ativo dos Correios, cria o pedido e seleciona automaticamente uma única opção Mini Envios pela API de Frete do Omie (`CotarFrete` e `SelecionarFrete` com `nIdFrete` e `lGratis: true`). A etapa permanece a atual, sem faturamento. Uma falha deixa a pendência visível sem refazer a inclusão. Somente em caso de pendência de frete aparece **Tentar frete novamente**, para recuperar essa etapa em pedidos existentes ainda não faturados; se a transportadora estiver vazia, define Correios e confere antes de cotar. Falhas da API pausam a integração e não disparam repetição automática. Etiqueta e postagem continuam dentro do Omie. O app também consulta o pedido para importar frete, modalidade, volumes, previsão e rastreio. Não existe chamada direta aos Correios pelo app.
 
+### Paginação do faturamento
+
+A tela de faturamento pagina separadamente preparações, pedidos pendentes e
+pedidos faturados, com 100 registros por página e navegação entre todas as páginas.
+Os indicadores mostram os totais globais do banco. A seleção para emitir NF-e
+abrange somente os pedidos da página atual, com limite de 100 por lote. Navegar
+entre páginas não consulta o Omie nem solicita faturamento.
+
 ### Informações complementares da NF-e
 
 Pedidos novos enviam em `informacoes_adicionais.dados_adicionais_nf` a frase:
