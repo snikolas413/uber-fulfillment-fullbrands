@@ -12,6 +12,43 @@ const PAGE_SIZE = 500;
 const text = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR");
 const digits = (value: string) => value.replace(/\D/g, "");
 
+export type RecipientReportPeriod = { from?: string; until?: string };
+
+function calendarDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error("Informe datas válidas no período de cadastro.");
+  const day = new Date(`${value}T00:00:00Z`);
+  if (!Number.isFinite(day.getTime()) || day.toISOString().slice(0,10) !== value || day.getUTCFullYear()<1900 || day.getUTCFullYear()>9998) {
+    throw new Error("Informe datas válidas no período de cadastro.");
+  }
+  return day;
+}
+
+function saoPauloDayStart(day: Date) {
+  const desired = day.getTime();
+  let instant = desired;
+  const candidates: number[] = [];
+  const formatter = new Intl.DateTimeFormat("en-CA",{timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"});
+  for (let attempt=0;attempt<4;attempt++) {
+    const parts = Object.fromEntries(formatter.formatToParts(new Date(instant)).map(part=>[part.type,part.value]));
+    const local = Date.UTC(Number(parts.year),Number(parts.month)-1,Number(parts.day),Number(parts.hour),Number(parts.minute),Number(parts.second));
+    const next = instant+desired-local;
+    if (next === instant) return new Date(instant).toISOString();
+    candidates.push(next); instant=next;
+  }
+  // If daylight saving skipped midnight, the later candidate is the start of that day.
+  return new Date(Math.max(...candidates)).toISOString();
+}
+
+export function recipientReportPeriod(start = "", end = ""): RecipientReportPeriod {
+  const first = start ? calendarDate(start) : null;
+  const last = end ? calendarDate(end) : null;
+  if (first && last && first > last) throw new Error("A data inicial deve ser anterior ou igual à data final.");
+  const period: RecipientReportPeriod = {};
+  if (first) period.from = saoPauloDayStart(first);
+  if (last) { last.setUTCDate(last.getUTCDate()+1); period.until=saoPauloDayStart(last); }
+  return period;
+}
+
 export function recipientLatestAddress(recipient: ReportRecipient) {
   return [...(recipient.delivery_addresses ?? [])].sort((a,b) =>
     Date.parse(b.created_at)-Date.parse(a.created_at) || b.id.localeCompare(a.id))[0];
@@ -48,7 +85,7 @@ export function recipientReportCsv(rows: ReportRecipient[]) {
   return "\uFEFF"+[RECIPIENT_REPORT_HEADERS,...records].map(record=>record.map(cell).join(";")).join("\r\n")+"\r\n";
 }
 
-export async function loadRecipientReport(client: SupabaseClient, search: string) {
+export async function loadRecipientReport(client: SupabaseClient, search: string, period: RecipientReportPeriod = {}) {
   const rows: ReportRecipient[] = [];
   let cursor: string | null = null;
   const asOf = new Date().toISOString();
@@ -62,6 +99,8 @@ export async function loadRecipientReport(client: SupabaseClient, search: string
       .order("id",{ascending:false,referencedTable:"delivery_addresses"})
       .limit(1,{referencedTable:"delivery_addresses"}).limit(PAGE_SIZE);
     if (cursor) query = query.gt("id",cursor);
+    if (period.from) query = query.gte("created_at",period.from);
+    if (period.until) query = query.lt("created_at",period.until);
     const {data,error} = await query;
     if (error || !data) throw new Error("Não foi possível consultar todos os destinatários. Tente novamente.");
     const page = data as unknown as ReportRecipient[];

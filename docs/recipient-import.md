@@ -73,6 +73,15 @@ a base acessível ao seu perfil. Com uma busca preenchida, o botão muda para
 **Exportar busca (CSV)** e usa os mesmos critérios da pesquisa por nome, CPF,
 telefone, e-mail, município, UF e CEP. Limpe a busca para exportar toda a base.
 
+Use **Data inicial** e **Data final** em **Período de cadastro para exportação**
+para extrair apenas os destinatários cadastrados nesse intervalo. Os limites
+incluem os dias completos no horário de São Paulo, inclusive o último dia (até
+antes da meia-noite seguinte). A data considerada é a de criação do cadastro,
+não a de alteração do endereço. Pode preencher somente uma data; sem datas,
+exporta toda a base. **Limpar período** remove as datas. Busca e período podem
+ser combinados. Períodos invertidos ou datas inválidas são rejeitados antes da
+extração. As datas também aparecem no nome do arquivo baixado.
+
 O relatório consulta o banco em páginas e não fica limitado aos registros
 carregados na tela. São considerados os destinatários cadastrados até o início
 da extração. Cada destinatário aparece uma vez, com seu endereço mais recente

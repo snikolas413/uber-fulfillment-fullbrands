@@ -35,6 +35,38 @@ test('busca compartilha critérios por nome sem acento, CPF formatado e CEP',()=
   assert.equal(report.matchesRecipientSearch(person,'Niterói'),false);
   assert.equal(report.matchesRecipientSearch(person,'000'),false);
 });
+test('período inclui os dias completos de São Paulo, aceita limites abertos e valida datas reais',()=>{
+  assert.deepEqual(report.recipientReportPeriod(),{});
+  assert.deepEqual(report.recipientReportPeriod('2026-11-12','2026-11-12'),{from:'2026-11-12T03:00:00.000Z',until:'2026-11-13T03:00:00.000Z'});
+  assert.deepEqual(report.recipientReportPeriod('2026-12-31',''),{from:'2026-12-31T03:00:00.000Z'});
+  assert.deepEqual(report.recipientReportPeriod('','2024-02-29'),{until:'2024-03-01T03:00:00.000Z'});
+  assert.equal(report.recipientReportPeriod('2018-11-04','').from,'2018-11-04T03:00:00.000Z');
+  for(const [start,end] of [['2026-11-17','2026-11-12'],['2026-02-29',''],['2026-11-31',''],['17/11/2026',''],['','bad']]) assert.throws(()=>report.recipientReportPeriod(start,end));
+});
+test('consulta aplica o período no banco sem perder busca ou o último instante do dia',async()=>{
+  const rows=[
+    {...person,id:'1',created_at:'2026-11-12T02:59:59.999Z'},
+    {...person,id:'2',created_at:'2026-11-12T03:00:00.000Z'},
+    {...person,id:'3',created_at:'2026-11-13T02:59:59.999999Z'},
+    {...person,id:'4',created_at:'2026-11-13T03:00:00.000Z'},
+    {...person,id:'5',full_name:'Outra pessoa',created_at:'2026-11-12T14:00:00.000Z'},
+  ];
+  const requests=[];
+  const client=createClient('https://example.supabase.co','test-key',{auth:{persistSession:false},global:{async fetch(input){
+    const url=new URL(input);requests.push(url);
+    let data=rows;
+    for(const condition of url.searchParams.getAll('created_at')){
+      const dot=condition.indexOf('.');const op=condition.slice(0,dot);const instant=Date.parse(condition.slice(dot+1));
+      if(op==='gte')data=data.filter(row=>Date.parse(row.created_at)>=instant);
+      if(op==='lt')data=data.filter(row=>Date.parse(row.created_at)<instant);
+    }
+    if(url.searchParams.has('id'))data=data.filter(row=>row.id>url.searchParams.get('id').slice(3));
+    return new Response(JSON.stringify(data),{status:200,headers:{'content-type':'application/json'}});
+  }}});
+  const result=await report.loadRecipientReport(client,'joao',report.recipientReportPeriod('2026-11-12','2026-11-12'));
+  assert.deepEqual(result.map(row=>row.id),['2','3']);
+  assert.ok(requests.every(url=>url.searchParams.getAll('created_at').includes('gte.2026-11-12T03:00:00.000Z')&&url.searchParams.getAll('created_at').includes('lt.2026-11-13T03:00:00.000Z')));
+});
 test('exportação alcança 1201 registros em páginas do servidor e falhas não geram arquivo parcial',async()=>{
   const rows=Array.from({length:1201},(_,i)=>({...person,id:String(i).padStart(5,'0'),full_name:'Pessoa '+i}));
   let pages=0;
@@ -62,4 +94,17 @@ test('endpoint exige sessão e perfil ativo, respeita busca e impede cache compa
     if(option.loggedOut||option.inactive)assert.equal(exported,0);
     if(response.status===200){assert.match(response.headers.get('Content-Disposition'),/attachment; filename="destinatarios-/);assert.equal(response.headers.get('X-Report-Row-Count'),'1');assert.match(await response.text(),/01234567890/);}
   }
+});
+test('endpoint rejeita períodos inválidos antes de consultar e envia os limites validados ao relatório',async()=>{
+  const calls=[];
+  const client={auth:{async getUser(){return {data:{user:{id:'user'}}};}},from(){const q={select(){return q;},eq(){return q;},async maybeSingle(){return {data:{is_active:true}};}};return q;}};
+  const api=load('../src/app/api/destinatarios/relatorio/route.ts',{'@/lib/supabase/server':{createSupabaseServerClient:async()=>client},'@/lib/recipient-report':{...report,async loadRecipientReport(_client,search,period){calls.push({search,period});return [];}}});
+  for(const query of ['start=2026-11-18&end=2026-11-12','start=2026-02-30','end=invalid']){
+    assert.equal((await api.GET(new Request('https://example.com/report?'+query))).status,400);
+  }
+  assert.equal(calls.length,0);
+  const response=await api.GET(new Request('https://example.com/report?q=joao&start=2026-11-12&end=2026-11-12'));
+  assert.equal(response.status,200);
+  assert.deepEqual(calls,[{search:'joao',period:{from:'2026-11-12T03:00:00.000Z',until:'2026-11-13T03:00:00.000Z'}}]);
+  assert.match(response.headers.get('Content-Disposition'),/destinatarios-2026-11-12-a-2026-11-12.csv/);
 });

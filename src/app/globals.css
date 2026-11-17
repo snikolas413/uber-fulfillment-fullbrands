@@ -217,6 +217,10 @@
 .import-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .recipient-export{display:flex;flex-direction:column;gap:6px;max-width:330px}
 .recipient-export small{font-size:11px;line-height:1.5;color:#637166}
+.recipient-export-period{display:grid;grid-template-columns:1fr 1fr;gap:8px;border:0;padding:0;margin:0;min-width:0}
+.recipient-export-period legend{font-size:11px;font-weight:600;margin-bottom:6px}
+.recipient-export-period label{display:flex;flex-direction:column;gap:4px;font-size:11px}
+.recipient-export-period input{min-width:0;width:100%;padding:7px;border:1px solid #d9dfd1;border-radius:5px;font:inherit;background:#fff}
 .import-modal{width:min(1450px,96vw);max-width:96vw}
 .import-content{padding:24px;overflow:auto;max-height:75vh}
 .import-content>p{font-size:13px;line-height:1.6;margin:0 0 14px}
