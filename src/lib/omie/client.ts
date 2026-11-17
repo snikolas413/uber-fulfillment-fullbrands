@@ -1,7 +1,8 @@
 import "server-only";
 
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { withRedundantReadRetry } from "@/lib/omie/read-retry";
+import { createOmieRequestControl, OmieRequestPausedError } from "@/lib/omie/request-control";
+import { acquireOmieRequest, finishOmieRequest } from "@/lib/omie/request-reservation";
 
 const OMIE_API_BASE_URL = (process.env.OMIE_API_BASE_URL ?? "https://app.omie.com.br/api/v1").replace(/\/+$/, "");
 const TOKEN_LIFETIME_MS = 23 * 60 * 60 * 1000;
@@ -36,6 +37,7 @@ export class OmieApiError extends Error {
     message: string,
     public readonly code?: string,
     public readonly httpStatus?: number,
+    public readonly retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = "OmieApiError";
@@ -158,14 +160,14 @@ async function loadCredentials(): Promise<StoredOmieCredentials> {
   }
 }
 
-async function refreshCredentials(force = false): Promise<StoredOmieCredentials> {
+async function refreshCredentials(): Promise<StoredOmieCredentials> {
   if (refreshPromise) return refreshPromise;
 
   refreshPromise = (async () => {
     const current = await loadCredentials();
     const expiresAt = Date.parse(current.expiresAt);
 
-    if (!force && expiresAt > Date.now() + TOKEN_REFRESH_MARGIN_MS) {
+    if (expiresAt > Date.now() + TOKEN_REFRESH_MARGIN_MS) {
       return current;
     }
 
@@ -280,15 +282,23 @@ function assertOmieSuccess(
         : `O Omie respondeu com HTTP ${result.response.status}.`,
       typeof result.payload?.faultcode === "string" ? result.payload.faultcode : undefined,
       result.response.status,
+      retryAfterSeconds(result.response.headers.get("retry-after")),
     );
   }
 
-  if (!result.payload) {
+  if (!result.payload || typeof result.payload !== "object" || Array.isArray(result.payload)) {
     throw new OmieApiError("O Omie retornou uma resposta vazia ou inválida.");
   }
 
   if (result.payload.faultstring) {
-    throw new OmieApiError(result.payload.faultstring, result.payload.faultcode);
+    throw new OmieApiError(result.payload.faultstring, result.payload.faultcode, result.response.status, retryAfterSeconds(result.response.headers.get("retry-after")));
+  }
+
+  const code = result.payload.cCodStatus ?? result.payload.codigo_status;
+  if (code != null && String(code) !== "" && String(code) !== "0") {
+    const description = result.payload.cDesStatus ?? result.payload.cDescStatus ?? result.payload.descricao_status;
+    throw new OmieApiError(typeof description === "string" ? description : "O Omie recusou a operação (código " + String(code) + ").", String(code), result.response.status,
+      retryAfterSeconds(result.response.headers.get("retry-after")));
   }
 
   return result.payload;
@@ -313,23 +323,35 @@ async function callOmieOnce<T extends Record<string, unknown>>(
     return assertOmieSuccess(result) as T;
   }
 
-  let credentials = await refreshCredentials();
-  let result = await requestOmieBearer(endpoint, method, params, credentials.accessToken);
-
-  if (result.response.status === 401) {
-    credentials = await refreshCredentials(true);
-    result = await requestOmieBearer(endpoint, method, params, credentials.accessToken);
-  }
+  const credentials = await refreshCredentials();
+  const result = await requestOmieBearer(endpoint, method, params, credentials.accessToken);
+  // Refresh on the NEXT explicit action; never replay this operation after a 401.
+  if (result.response.status === 401 && cachedCredentials) cachedCredentials = { ...cachedCredentials, expiresAt: new Date(0).toISOString() };
 
   return assertOmieSuccess(result) as T;
 }
+
+function retryAfterSeconds(value: string | null) {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, Math.ceil(seconds));
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, Math.ceil((date - Date.now()) / 1000)) : undefined;
+}
+
+const controlledRequest = createOmieRequestControl({ acquire: acquireOmieRequest, finish: finishOmieRequest });
 
 export async function callOmie<T extends Record<string, unknown>>(
   endpoint: string,
   method: string,
   params: Record<string, unknown> = {},
 ): Promise<T> {
-  return withRedundantReadRetry(method, () => callOmieOnce<T>(endpoint, method, params));
+  try {
+    return await controlledRequest(endpoint, method, params, () => callOmieOnce<T>(endpoint, method, params));
+  } catch (error) {
+    if (error instanceof OmieRequestPausedError) throw new OmieApiError(error.message, "LOCAL_PAUSE");
+    throw error;
+  }
 }
 
 export function getOmieCredentialStatus() {

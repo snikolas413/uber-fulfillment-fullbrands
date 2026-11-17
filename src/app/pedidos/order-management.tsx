@@ -112,6 +112,7 @@ export function OrderManagement({
   const [activeId, setActiveId] = useState<string | null>(null);
   const [batchTotal, setBatchTotal] = useState(0);
   const [batchDone, setBatchDone] = useState(0);
+  const [batchNotice, setBatchNotice] = useState("");
 
   const readyRecipients = recipients.filter((recipient) =>
     (recipient.delivery_addresses ?? []).some((address) => address.validation_status !== "invalid"),
@@ -137,11 +138,13 @@ export function OrderManagement({
     const ids = selectedOrders.map(draft => draft.id);
     sendingRef.current = true; stopRef.current = false;
     setSending(true); setStopping(false); setBatchTotal(ids.length); setBatchDone(0);
+    setBatchNotice("");
     try {
       await runOrderSendBatch(ids, {
         send: sendOrderToOmieAction, shouldStop: () => stopRef.current,
         onStart: setActiveId,
         onResult(id, result) {
+          if (result.status !== "success") setBatchNotice("Lote interrompido na primeira pendência. Os pedidos restantes não foram enviados. Confira o resultado antes de iniciar outro lote.");
           setSendResults(current => ({ ...current, [id]: result }));
           setSelected(current => current.filter(value => value !== id));
           setBatchDone(current => current + 1);
@@ -197,7 +200,7 @@ export function OrderManagement({
           <button type="button" className="primary-button" disabled={sending || !selectedOrders.length} onClick={sendSelected}>{sending ? <LoaderCircle size={16} className="auth-spinner" /> : <Send size={16} />} {sending ? "Enviando ao Omie..." : "Enviar selecionados ao Omie"}</button>
           {sending && <button type="button" className="secondary-button" disabled={stopping} onClick={() => { stopRef.current = true; setStopping(true); }}>{stopping ? "Concluindo pedido atual..." : "Parar após o pedido atual"}</button>}
         </div>}
-        {batchTotal > 0 && <div role="status" aria-live="polite" className="order-send-progress">{sending ? "Processando" : "Lote encerrado"}: {batchDone} de {batchTotal} pedido(s). {sending ? "Mantenha esta página aberta." : "Confira o resultado em cada linha."}</div>}
+        {batchTotal > 0 && <div role="status" aria-live="polite" className="order-send-progress">{sending ? "Processando" : "Lote encerrado"}: {batchDone} de {batchTotal} pedido(s). {sending ? "Mantenha esta página aberta." : batchNotice || "Confira o resultado em cada linha."}</div>}
         {loadError && <div className="recipient-alert recipient-alert-error">{loadError}</div>}
         {visibleDrafts.length ? (
           <div className="orders-table-wrap">

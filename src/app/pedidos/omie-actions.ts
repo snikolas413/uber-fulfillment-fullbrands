@@ -211,11 +211,11 @@ async function includeOrder(supabase: Awaited<ReturnType<typeof createSupabaseSe
     email_present: Boolean(email), shipping_in_omie: true, reference_order: reference.number,
   });
   revalidatePath("/pedidos"); revalidatePath("/faturamento"); revalidatePath("/");
-  const selected = await applyMiniEnviosFreight(supabase, userId, { ...row, status: "order_created", omie_order_id: orderId, omie_order_number: orderNumber });
+  const selected = await applyMiniEnviosFreight(supabase, userId, { ...row, status: "order_created", omie_order_id: orderId, omie_order_number: orderNumber }, carrierId);
   return { status: selected.status, message: "Pedido criado no Omie" + (orderNumber ? " com número " + orderNumber : "") + ". " + selected.message };
 }
 
-async function applyMiniEnviosFreight(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, userId: string, row: Fulfillment): Promise<OmieActionResult> {
+async function applyMiniEnviosFreight(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, userId: string, row: Fulfillment, createdCarrierId?: number): Promise<OmieActionResult> {
   let selected = false;
   const persistMessage = async (message: string | null) => {
     try {
@@ -227,13 +227,14 @@ async function applyMiniEnviosFreight(supabase: Awaited<ReturnType<typeof create
     if (!row.omie_order_id || !["order_created", "billing_pending"].includes(row.status)) {
       return { status: "warning", message: "O pedido precisa estar criado no Omie e ainda não faturado para selecionar o frete." };
     }
-    const result = await selectMiniEnviosFreight(callOmie, row.omie_order_id, integrationCode(row.id));
+    const result = await selectMiniEnviosFreight(callOmie, row.omie_order_id, integrationCode(row.id), createdCarrierId);
     selected = true;
     await audit(supabase, userId, row.id, "omie.freight.selected", {
       omie_order_id: row.omie_order_id, freight_quote_id: result.quote.nIdFrete,
       service_code: result.quote.cTipoServico, service_name: result.quote.cDescricaoServico,
       carrier_id: result.carrierId, free_for_customer: true, quoted_amount: result.quote.nValorFrete,
       quoted_delivery_days: result.quote.nDiasEntrega,
+      confirmation: result.confirmation,
     });
     const { error } = await supabase.from("shipments").upsert({
       fulfillment_id: row.id, carrier_id: String(result.carrierId), service_code: result.quote.cTipoServico,
@@ -244,7 +245,9 @@ async function applyMiniEnviosFreight(supabase: Awaited<ReturnType<typeof create
     const message = error ? "Mini Envios foi selecionado no Omie, mas a cópia local do frete não foi atualizada. Confira o ERP antes de repetir." : null;
     await persistMessage(message);
     return message ? { status: "warning", message }
-      : { status: "success", message: "Opção Mini Envios selecionada e pedido consultado com frete grátis para o cliente." };
+      : { status: "success", message: result.confirmation === "accepted"
+        ? "Mini Envios aceito pelo Omie com frete grátis. O valor salvo será conferido novamente antes do faturamento."
+        : "Opção Mini Envios selecionada e pedido consultado com frete grátis para o cliente." };
   } catch (error) {
     await audit(supabase, userId, row.id, "omie.freight.selection_pending", {
       omie_order_id: row.omie_order_id,

@@ -31,10 +31,10 @@ test('envio em lote é sequencial, só usa selecionados e nunca autoriza reinclu
       return { status: 'success', message: 'Pedido criado e Mini Envios selecionado' };
     }, onStart() {}, onResult(id, result) { results.push([id, result]); }, shouldStop: () => false,
   });
-  assert.deepEqual(calls, ['one', 'lost', 'last']);
+  assert.deepEqual(calls, ['one', 'lost']);
   assert.equal(results[1][1].status, 'warning');
   assert.match(results[1][1].message, /Atualizar Omie/);
-  assert.equal(results[2][1].status, 'success');
+  assert.equal(results.length, 2);
 });
 
 test('interrompe somente depois do pedido atual e bloqueia lotes fora do limite', async () => {
@@ -44,6 +44,18 @@ test('interrompe somente depois do pedido atual e bloqueia lotes fora do limite'
   await batch.runOrderSendBatch(['one', 'two'], options);
   assert.deepEqual(calls, ['one']);
   for (const ids of [[], Array.from({ length: 101 }, (_, i) => String(i))]) await assert.rejects(batch.runOrderSendBatch(ids, options));
+});
+
+test('erro ou pendência interrompe o lote antes dos restantes, sem nova tentativa', async () => {
+  for (const status of ['error', 'warning']) {
+    const calls = [], results = [];
+    await batch.runOrderSendBatch(['one', 'two', 'three'], {
+      async send(id) { calls.push(id); return { status, message: 'Omie indisponível' }; },
+      onStart() {}, onResult(id, result) { results.push([id, result]); }, shouldStop: () => false,
+    });
+    assert.deepEqual(calls, ['one']);
+    assert.equal(results.length, 1);
+  }
 });
 
 test('seleção só admite preparados sem ID Omie; tentativas pendentes e pedidos avançados ficam fora do lote', () => {

@@ -20,5 +20,7 @@ export async function runOrderSendBatch(ids: string[], options: {
     try { result = await options.send(id, false); }
     catch { result = { status: "warning", message: "Resposta não confirmada. Use Atualizar Omie para conferir este pedido antes de qualquer nova tentativa." }; }
     options.onResult(id, result);
+    // An API failure can affect the whole integration. Leave untouched orders selected.
+    if (result.status !== "success") break;
   }
 }

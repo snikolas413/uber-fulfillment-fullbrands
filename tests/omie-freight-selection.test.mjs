@@ -63,7 +63,7 @@ function omieStub(options = {}) {
       if (options.cancelError) throw new Error('Renovação indisponível');
       return options.cancelResponse ?? {};
     }
-    if (method === 'SelecionarFrete') { if (options.selectTimeout) throw new Error('Timeout'); return options.selectResponse ?? {}; }
+    if (method === 'SelecionarFrete') { if (options.selectTimeout) throw new Error('Timeout'); return options.selectResponse ?? { cCodStatus: '0' }; }
     if (method === 'IncluirPedido') return { codigo_pedido: 555, numero_pedido: '1128' };
     throw new Error('Método não autorizado no teste: ' + method);
   };
@@ -99,6 +99,22 @@ test('timeout na seleção não é repetido e retorna resultado desconhecido', a
   const { request, calls } = omieStub({ selectTimeout: true });
   await assert.rejects(freight.selectMiniEnviosFreight(request, 555, integrationCode), error => error.outcome === 'unknown');
   assert.equal(calls.filter(call => call.method === 'SelecionarFrete').length, 1);
+});
+
+test('pedido recém-criado consulta uma vez e exige aceite explícito do frete grátis', async () => {
+  const { request, calls } = omieStub();
+  const result = await freight.selectMiniEnviosFreight(request, 555, integrationCode, 123);
+  assert.equal(result.confirmation, 'accepted');
+  assert.equal(result.freeForCustomer, true);
+  assert.deepEqual(calls.map(call => call.method), ['CotarFrete', 'ConsultarPedido', 'SelecionarFrete']);
+  for (const options of [{ wrongLink: true }, { cancelled: true }, { invoiced: true }]) {
+    const stub = omieStub(options);
+    await assert.rejects(freight.selectMiniEnviosFreight(stub.request, 555, integrationCode, 123));
+    assert.ok(!stub.calls.some(call => call.method === 'SelecionarFrete'));
+  }
+  const missing = omieStub({ selectResponse: {} });
+  await assert.rejects(freight.selectMiniEnviosFreight(missing.request, 555, integrationCode, 123), error => error.outcome === 'unknown');
+  assert.equal(missing.calls.filter(call => call.method === 'SelecionarFrete').length, 1);
 });
 
 test('distingue rejeição de seleção aceita com falha na conferência posterior', async () => {
@@ -317,32 +333,23 @@ test('relata opções não reconhecidas com diagnóstico restrito aos campos de 
 
 const upstreamError = 'Nenhuma resposta foi obtida do servidor!Não foram encontradas opções de entrega para este Pedido de Venda';
 
-test('renova uma vez a cotação com falha de resposta e seleciona apenas a nova opção', async () => {
+test('erro de cotação é devolvido na primeira resposta, sem cancelar nem repetir a API', async () => {
   for (const quoteStatusError of [false, true]) {
     const { request, calls } = omieStub({ upstreamError, quoteStatusError });
-    await freight.selectMiniEnviosFreight(request, 555, integrationCode);
+    await assert.rejects(freight.selectMiniEnviosFreight(request, 555, integrationCode), /Nenhuma resposta/);
     const methods = calls.map(call => call.method);
-    assert.equal(methods.filter(method => method === 'CotarFrete').length, 2);
-    assert.equal(methods.filter(method => method === 'CancelarCotacao').length, 1);
-    const refresh = calls.findIndex(call => call.method === 'CancelarCotacao');
-    assert.equal(methods[refresh - 1], 'ConsultarPedido');
-    assert.equal(methods[refresh + 1], 'CotarFrete');
-    assert.deepEqual(calls[refresh].params, { nIdPedido: 555 });
-    assert.equal(methods.filter(method => method === 'SelecionarFrete').length, 1);
+    assert.equal(methods.filter(method => method === 'CotarFrete').length, 1);
+    assert.ok(!methods.some(method => ['CancelarCotacao', 'SelecionarFrete'].includes(method)));
   }
 });
 
-test('interrompe se renovação falhar ou se segunda cotação continuar indisponível', async () => {
+test('indisponibilidade persistente não inicia renovação ou segunda cotação', async () => {
   for (const options of [{ cancelError: true }, { alwaysQuoteError: true }]) {
     const { request, calls } = omieStub({ upstreamError, ...options });
-    await assert.rejects(freight.selectMiniEnviosFreight(request, 555, integrationCode), error => {
-      assert.equal(error.outcome, 'not_selected');
-      assert.equal(error.diagnostic.stage, options.cancelError ? 'refresh_quote' : 'quote_after_refresh');
-      return true;
-    });
-    assert.equal(calls.filter(call => call.method === 'CancelarCotacao').length, 1);
+    await assert.rejects(freight.selectMiniEnviosFreight(request, 555, integrationCode));
+    assert.equal(calls.filter(call => call.method === 'CancelarCotacao').length, 0);
     assert.ok(!calls.some(call => call.method === 'SelecionarFrete'));
-    assert.ok(calls.filter(call => call.method === 'CotarFrete').length <= 2);
+    assert.equal(calls.filter(call => call.method === 'CotarFrete').length, 1);
   }
 });
 
@@ -353,7 +360,8 @@ test('não renova cotações válidas vazias nem outros erros de negócio', asyn
     assert.ok(!calls.some(call => ['CancelarCotacao', 'SelecionarFrete'].includes(call.method)));
   }
   const noPreviousQuote = omieStub({ upstreamError, cancelResponse: { cCodStatus: '100', cDesStatus: 'Cotação não encontrada' } });
-  await freight.selectMiniEnviosFreight(noPreviousQuote.request, 555, integrationCode);
+  await assert.rejects(freight.selectMiniEnviosFreight(noPreviousQuote.request, 555, integrationCode));
+  assert.ok(!noPreviousQuote.calls.some(call => call.method === 'CancelarCotacao'));
 });
 
 test('reconhece o código oficial Mini Envios quando descrição não é retornada, sem aceitar PAC', async () => {

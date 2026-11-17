@@ -77,35 +77,10 @@ function checkResponse(response: { cCodStatus?: string; cDesStatus?: string }) {
 
 type QuoteResponse = { listaCotacao?: FreightQuote[]; cCodStatus?: string; cDesStatus?: string };
 
-async function quoteFreight(request: Request, orderId: number, integrationCode: string, carrierId: number) {
-  const quote = async () => {
-    const response = await request<QuoteResponse>("/produtos/frete/", "CotarFrete", { nIdPedido: orderId });
-    checkResponse(response);
-    return response;
-  };
-  try {
-    return await quote();
-  } catch (error) {
-    // Recover only this specific upstream failure. Do not retry selection or hide other errors.
-    if (!(error instanceof Error) || !/Nenhuma resposta foi obtida do servidor/i.test(error.message) ||
-      !/N[aã]o foram encontradas op[cç][oõ]es de entrega/i.test(error.message)) throw error;
-  }
-  const current = await readOrder(request, orderId, integrationCode);
-  if (current.frete?.codigo_transportadora !== carrierId) {
-    throw new FreightSelectionError("A transportadora mudou durante a cotação. Atualize o pedido antes de continuar.");
-  }
-  try {
-    const cleared = await request<{ cCodStatus?: string; cDesStatus?: string }>("/produtos/frete/", "CancelarCotacao", { nIdPedido: orderId });
-    // 100 means there was no quotation to clear, per the Frete API contract.
-    if (String(cleared.cCodStatus) !== "100") checkResponse(cleared);
-  } catch (error) {
-    throw new FreightSelectionError("Não foi possível renovar a cotação no Omie. " + (error instanceof Error ? error.message : "Confira a integração de frete."), "not_selected", { stage: "refresh_quote", options: [] });
-  }
-  try {
-    return await quote();
-  } catch (error) {
-    throw new FreightSelectionError("A cotação foi renovada, mas o Omie continuou recusando a consulta de frete. " + (error instanceof Error ? error.message : "Confira a integração de frete."), "not_selected", { stage: "quote_after_refresh", options: [] });
-  }
+async function quoteFreight(request: Request, orderId: number) {
+  const response = await request<QuoteResponse>("/produtos/frete/", "CotarFrete", { nIdPedido: orderId });
+  checkResponse(response);
+  return response;
 }
 
 async function readOrder(request: Request, orderId: number, integrationCode: string): Promise<Order> {
@@ -121,9 +96,10 @@ async function readOrder(request: Request, orderId: number, integrationCode: str
 }
 
 /** Selects a quoted freight option. Does not generate freight, labels or invoices. */
-export async function selectMiniEnviosFreight(request: Request, orderId: number, integrationCode: string) {
-  let before = await readOrder(request, orderId, integrationCode);
-  let carrierId = before.frete?.codigo_transportadora;
+export async function selectMiniEnviosFreight(request: Request, orderId: number, integrationCode: string, createdCarrierId?: number) {
+  // Only supplied immediately after a successful inclusion with this resolved carrier.
+  let before = createdCarrierId ? undefined : await readOrder(request, orderId, integrationCode);
+  let carrierId = createdCarrierId ?? before?.frete?.codigo_transportadora;
   if (!carrierId) {
     carrierId = await resolveCorreiosCarrier(request);
     await request("/produtos/pedido/", "AlterarPedidoVenda", {
@@ -138,11 +114,13 @@ export async function selectMiniEnviosFreight(request: Request, orderId: number,
   if (!Number.isSafeInteger(carrierId) || carrierId <= 0) {
     throw new FreightSelectionError("O pedido retornou um código de transportadora inválido.");
   }
-  const carrier = await request<{ codigo_cliente_omie?: number; razao_social?: string; nome_fantasia?: string }>("/geral/clientes/", "ConsultarCliente", { codigo_cliente_omie: carrierId });
-  if (carrier.codigo_cliente_omie !== carrierId || ![carrier.razao_social, carrier.nome_fantasia].some(name => typeof name === "string" && correiosNames.has(normalize(name)))) {
-    throw new FreightSelectionError("A transportadora do pedido não foi confirmada como Correios. Nenhuma opção de frete foi selecionada.");
+  if (!createdCarrierId) {
+    const carrier = await request<{ codigo_cliente_omie?: number; razao_social?: string; nome_fantasia?: string }>("/geral/clientes/", "ConsultarCliente", { codigo_cliente_omie: carrierId });
+    if (carrier.codigo_cliente_omie !== carrierId || ![carrier.razao_social, carrier.nome_fantasia].some(name => typeof name === "string" && correiosNames.has(normalize(name)))) {
+      throw new FreightSelectionError("A transportadora do pedido não foi confirmada como Correios. Nenhuma opção de frete foi selecionada.");
+    }
   }
-  const response = await quoteFreight(request, orderId, integrationCode, carrierId);
+  const response = await quoteFreight(request, orderId);
   if (!Array.isArray(response.listaCotacao)) throw new FreightSelectionError("O Omie não retornou opções válidas para a cotação de frete.");
   if (!response.listaCotacao.length) throw new FreightSelectionError("O Omie retornou uma cotação sem opções de entrega. Nenhum frete foi selecionado.", "not_selected", quoteDiagnostic([]));
   const matches = response.listaCotacao.filter(isMiniQuote);
@@ -163,10 +141,16 @@ export async function selectMiniEnviosFreight(request: Request, orderId: number,
   let selection;
   try {
     selection = await request<{ cCodStatus?: string; cDesStatus?: string }>("/produtos/frete/", "SelecionarFrete", { nIdFrete: quote.nIdFrete, lGratis: true });
-  } catch {
-    throw new FreightSelectionError("O resultado da seleção de Mini Envios não foi confirmado. Confira a opção salva no Omie antes de tentar novamente.", "unknown");
+  } catch (error) {
+    throw new FreightSelectionError("O resultado da seleção de Mini Envios não foi confirmado. Confira a opção salva no Omie antes de tentar novamente. " + (error instanceof Error ? error.message : ""), "unknown");
   }
   checkResponse(selection);
+  if (createdCarrierId) {
+    if (String(selection.cCodStatus ?? "") !== "0") throw new FreightSelectionError("O Omie não confirmou o aceite do frete. Confira o pedido antes de repetir.", "unknown");
+    // SelecionarFrete explicitly accepted lGratis:true. Billing independently checks
+    // the saved carrier and amount. Avoid two additional identical order reads here.
+    return { quote, carrierId, freight: { ...current.frete, valor_frete: 0 }, freeForCustomer: true as const, confirmation: "accepted" as const };
+  }
   try {
     const saved = await readOrder(request, orderId, integrationCode);
     // ConsultarPedido can omit zero-valued fields. Only apply this default after
@@ -175,8 +159,8 @@ export async function selectMiniEnviosFreight(request: Request, orderId: number,
     if (saved.frete?.codigo_transportadora !== carrierId || !Number.isFinite(freightAmount) || freightAmount !== 0) {
       throw new Error("Frete grátis não confirmado");
     }
-    return { quote, carrierId, freight: saved.frete, freeForCustomer: true as const };
-  } catch {
-    throw new FreightSelectionError("O Omie aceitou a seleção de Mini Envios, mas a conferência do pedido com frete grátis não foi concluída. Confira o pedido no ERP antes de repetir a operação.", "selected");
+    return { quote, carrierId, freight: saved.frete, freeForCustomer: true as const, confirmation: "verified" as const };
+  } catch (error) {
+    throw new FreightSelectionError("O Omie aceitou a seleção de Mini Envios, mas a conferência do pedido com frete grátis não foi concluída. Confira o pedido no ERP antes de repetir a operação. " + (error instanceof Error ? error.message : ""), "selected");
   }
 }

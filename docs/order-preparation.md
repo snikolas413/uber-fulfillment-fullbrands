@@ -97,7 +97,7 @@ O envio usa código de integração determinístico por pedido local. Antes de u
 ## Faturamento e expedição
 O faturamento ocorre por ação separada com confirmação explícita na aba **Faturamento**: selecione até 100 pedidos e clique em **Faturar selecionados**. O lote é processado em sequência, com resultado individual, e a página deve permanecer aberta. Antes de solicitar NF-e, a aplicação reconfere o pedido e o frete, reserva a emissão para impedir concorrência, prepara e confirma a etapa `50` somente durante este faturamento e exige resultado positivo da validação do Omie. Depois lê o estado fiscal e os dados de NF-e retornados. Um aceite ainda sem confirmação de nota aparece como pendência e não é reenviado automaticamente. Consulte **Atualizar Omie** para reconciliar tentativas anteriores.
 
-Ao clicar em **Enviar ao Omie**, a aplicação resolve o cadastro ativo dos Correios, cria o pedido e seleciona automaticamente uma única opção Mini Envios pela API de Frete do Omie (`CotarFrete` e `SelecionarFrete` com `nIdFrete` e `lGratis: true`). A etapa permanece a atual, sem faturamento. Uma falha deixa a pendência visível sem refazer a inclusão. Somente em caso de pendência de frete aparece **Tentar frete novamente**, para recuperar essa etapa em pedidos existentes ainda não faturados; se a transportadora estiver vazia, define Correios e confere antes de cotar. Consultas bloqueadas por `REDUNDANT` aguardam o prazo informado dentro dos limites documentados e são repetidas uma vez. Etiqueta e postagem continuam dentro do Omie. O app também consulta o pedido para importar frete, modalidade, volumes, previsão e rastreio. Não existe chamada direta aos Correios pelo app.
+Ao clicar em **Enviar ao Omie**, a aplicação resolve o cadastro ativo dos Correios, cria o pedido e seleciona automaticamente uma única opção Mini Envios pela API de Frete do Omie (`CotarFrete` e `SelecionarFrete` com `nIdFrete` e `lGratis: true`). A etapa permanece a atual, sem faturamento. Uma falha deixa a pendência visível sem refazer a inclusão. Somente em caso de pendência de frete aparece **Tentar frete novamente**, para recuperar essa etapa em pedidos existentes ainda não faturados; se a transportadora estiver vazia, define Correios e confere antes de cotar. Falhas da API pausam a integração e não disparam repetição automática. Etiqueta e postagem continuam dentro do Omie. O app também consulta o pedido para importar frete, modalidade, volumes, previsão e rastreio. Não existe chamada direta aos Correios pelo app.
 
 ### Informações complementares da NF-e
 
@@ -113,6 +113,37 @@ ou na conferência impede o faturamento. Pedidos cancelados ou já faturados nã
 são alterados. Nos pedidos pendentes, a atualização ocorre quando o usuário
 aciona o faturamento pelo aplicativo; não há emissão automática em segundo plano
 nem alteração de notas já autorizadas.
+
+### Desempenho e proteção da API Omie
+
+O envio de um pedido recém-incluído reaproveita a transportadora resolvida para a
+inclusão. Depois da cotação, consulta uma vez o pedido para conferir vínculo,
+situação e transportadora, e exige `cCodStatus: "0"` de `SelecionarFrete` com
+`lGratis: true`. O aceite é identificado na auditoria como `confirmation: accepted`;
+a transportadora e o valor efetivamente salvos continuam sendo conferidos antes
+do faturamento. Recuperações de pedidos existentes mantêm a conferência posterior.
+
+Consultas idênticas de cadastro, cenário e simulação usam cache de sucesso de 61
+segundos, com chave incluindo todos os parâmetros (inclusive UF). Consultas de
+pedido, NF-e e status nunca usam cache; quando repetidas, aguardam a janela de
+61 segundos antes de acessar o Omie. Nenhuma falha dispara repetição automática,
+incluindo `REDUNDANT`, cotação indisponível e HTTP 401.
+
+As chamadas passam por uma fila no servidor e uma reserva persistente compartilhada
+no Supabase, com uma chamada por vez e intervalo mínimo de 300 ms. Qualquer erro
+de transporte, resposta inválida, `faultstring` ou status de negócio recusado pausa
+a integração por no mínimo 61 segundos. HTTP 425 ou indicação de consumo indevido
+pausa por no mínimo 30 minutos; prazos maiores de `Retry-After` ou da mensagem são
+respeitados, até 24 horas. Cliques durante a pausa não acessam a API nem renovam
+o prazo. A reserva expira em 120 segundos caso o processo seja interrompido.
+Se o controle no banco estiver indisponível, o sistema não envia chamadas ao Omie.
+
+O lote de envio para na primeira falha ou pendência. Os pedidos ainda não
+processados permanecem selecionados, sem envio. Retomar exige uma nova ação do
+usuário após conferir o erro e respeitar a pausa. Pedidos com inclusão incerta
+continuam exigindo reconciliação antes de autorizar nova inclusão.
+
+Referência: [Limites de Consumo da API do Omie](https://ajuda.omie.com.br/pt-BR/articles/8112984-limites-de-consumo-da-api-do-omie).
 
 ## Configuração ainda necessária
 - Credenciais próprias do app Omie (app_hash, access token, refresh token e timestamp ISO do primeiro token) no Render.
