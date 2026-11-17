@@ -145,6 +145,40 @@ test('normaliza número marcado, sem número, cidade com UF, nome duplicado e CE
   assert.equal(normalizeImportRow(row).complemento,row.complemento);
 });
 
+test('separa números com símbolos, letras, barras e travessões sem perder partes ou zeros', () => {
+  const [base]=rowsFromCells([IMPORT_COLUMNS,values]);
+  for (const [address,number,complement] of [
+    ['Rua Afonso, n.º 0012-A, casa 2','0012-A','casa 2'],
+    ['Rua Afonso #123/A apto 4','123/A','apto 4'],
+    ['Rua Afonso – 123/2, fundos','123/2','fundos'],
+    ['Rua Afonso, 123 – B, casa 2','123-B','casa 2'],
+    ['Rua Afonso: １２３','123',''],
+    ['Rua Afonso nº: 12.345','12.345',''],
+    ['Rua Afonso 123 / 2','123/2',''],
+    ['Rua Afonso 123-B','123-B',''],
+    ['Rua Afonso S / N','S/N',''],
+    ['Rua Afonso; 123; casa 2','123','casa 2'],
+    ['Rua Afonso • 123 • casa 2','123','casa 2'],
+    ['Rua Afonso Nº123, apto 4','123','apto 4'],
+    ['Rua Afonso № 123, casa 2','123','casa 2'],
+  ]) {
+    const row=normalizeImportRow({...base,endereco:address,numero:'',complemento:''});
+    assert.equal(row.endereco,'Rua Afonso',address);
+    assert.equal(row.numero,number,address);
+    assert.equal(row.complemento,complement,address);
+    assert.equal(normalizeImportRow(row).numero,number,address+' (segunda conferência)');
+    assert.equal(normalizeImportRow(row).complemento,complement,address+' (complemento preservado)');
+  }
+  const explicit=normalizeImportRow({...base,endereco:'Rua Afonso nº 0012-A',numero:'n.º 0012 – A',complemento:'Casa 1'});
+  assert.equal(explicit.numero,'0012-A');assert.equal(explicit.endereco,'Rua Afonso');
+  const conflict=normalizeImportRow({...base,endereco:'Rua Afonso nº 13-A',numero:'15',complemento:''});
+  assert.equal(conflict.numero,'15');assert.equal(conflict.endereco,'Rua Afonso nº 13-A');
+  for(const address of ['Rua 25','Avenida 9 de Julho','BR 101','Rodovia BR-101 km 15']) {
+    const row=normalizeImportRow({...base,endereco:address,numero:'',complemento:''});
+    assert.equal(row.numero,'',address);assert.equal(row.endereco,address);
+  }
+});
+
 test('aceita aliases de cabeçalho e contatos opcionais, mas não inventa número ou contato', () => {
   const [row] = rowsFromCells([['CPF','Nome completo','Endereço','CEP','numero'],['01234567890','Nome Teste','Rua Afonso','05426200','13']]);
   assert.equal(row.email,''); assert.equal(row.phone_number,'');
@@ -241,6 +275,16 @@ test('servidor preserva campos e ignora CPF repetido ou reenviado', async () => 
   assert.ok(revalidated.includes('/destinatarios'));
 });
 
+test('conferência e gravação preservam número com letras e barra extraído do endereço original', async () => {
+  const [base]=rowsFromCells([IMPORT_COLUMNS,values]);
+  const db=actionWithDatabase();
+  const result=await db.action([{...base,endereco:'Rua Afonso, n.º 0012/A, apto 4',numero:'',complemento:''}]);
+  assert.equal(result[0].status,'created');
+  assert.equal(db.saved[0].p_street,'Rua Afonso');
+  assert.equal(db.saved[0].p_number,'0012/A');
+  assert.equal(db.saved[0].p_complement,'apto 4');
+});
+
 test('servidor revalida campos e continua após erro de uma linha', async () => {
   const [row] = rowsFromCells([IMPORT_COLUMNS, values]);
   const { action, saved } = actionWithDatabase({ failCpf: row.cpf });
@@ -295,6 +339,9 @@ test('prévia separa linhas prontas das pendências e só mostra confirmação m
   const ready=render('ready');
   assert.match(ready,/Nome, linha 2/);assert.doesNotMatch(ready,/Nome, linha 3/);
   assert.doesNotMatch(ready,/type="checkbox"/);
+  assert.match(ready,/<td class="import-result">Pronto para importar<\/td>/);
+  assert.doesNotMatch(ready,/Ver ajustes e avisos/);
+  assert.doesNotMatch(ready,/Consulta temporariamente indisponível/);
   const issues=render('issues');
   assert.doesNotMatch(issues,/Nome, linha 2/);assert.match(issues,/Nome, linha 3/);
   assert.match(issues,/Nome, linha 4/);assert.match(issues,/Conferir endereço/);

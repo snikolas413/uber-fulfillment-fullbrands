@@ -16,6 +16,16 @@ Na tela Destinatários, use **Importar arquivo**, selecione o arquivo, revise a 
 
 ## Revisão e gravação
 
+Linhas liberadas mostram somente **Pronto para importar** na coluna de validação,
+sem detalhes de ajustes ou avisos. Pendências continuam mostrando o motivo.
+
+A separação de endereço reconhece marcadores como `n.º`, `nº`, `#`, dois-pontos,
+travessões e separadores, além de números como `0012-A`, `123/A` e `123/2`.
+Zeros à esquerda, letras, barras e complemento são preservados. Um número
+preenchido em coluna própria não é substituído por outro extraído do endereço.
+Números em nomes de ruas e quilometragem de rodovias não são usados como número
+do imóvel quando a identificação é ambígua.
+
 `Rua Afonso 13 casa 2` é separado em `Rua Afonso`, `13`, `casa 2`. Endereços que não permitem identificar o número ficam pendentes até correção na prévia. Revise sempre a separação automática.
 
 CPF precisa ter 11 dígitos, CEP 8, UF brasileira válida e endereço completo. Telefone e e-mail são opcionais no cadastro; quando preenchidos precisam ser válidos (telefone de 10 a 13 dígitos com DDD). A ausência gera um aviso. O e-mail continua necessário antes de preparar um pedido. O CPF é validado pelo tamanho, sem verificação dos dígitos verificadores.

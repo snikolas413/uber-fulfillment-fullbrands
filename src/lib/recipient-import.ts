@@ -79,6 +79,27 @@ const identifierDigits = (value: string) => {
   return digitsOnly(value);
 };
 
+const addressPunctuation = (value: string) => value
+  .replace(/[\u2010-\u2015\u2212\ufe63\uff0d]/g, "-")
+  .replace(/[０-９]/g, digit => String(digit.charCodeAt(0) - 0xff10));
+const houseNumber = "(?:\\d+(?:\\s*[-/.]\\s*\\d+)*(?:\\s*[-/]?\\s*[A-Za-z])?|s\\s*[/.\\-]?\\s*n[º°.]?|sem\\s+n[úu]mero)";
+const numberMarker = "(?:n[úu]mero|n\\.?\\s*[º°o]|n\\.|n(?=\\s*[:#]?\\s*\\d)|#|№)";
+const numberPattern = new RegExp("^" + houseNumber + "$", "i");
+const numberPrefix = new RegExp("^" + numberMarker + "\\s*[:#]?\\s*(?=" + houseNumber + "$)", "i");
+const addressTail = "(?:[,;|•·\\s]+(.*))?$";
+const addressNumberPatterns = [
+  new RegExp("^(.+?)[,;|•·\\s-]+" + numberMarker + "\\s*[:.#]?\\s*(" + houseNumber + ")" + addressTail, "i"),
+  new RegExp("^(.+?)[,;|•·:]\\s*(" + houseNumber + ")" + addressTail, "i"),
+  new RegExp("^(.+?)\\s+-\\s*(" + houseNumber + ")" + addressTail, "i"),
+  new RegExp("^(.+?)\\s+(" + houseNumber + ")(?:[,;|•·\\s]+((?:casa|ap(?:to?)?|apartamento|bl(?:oco)?|fundos|sala|lt|lote|qd|quadra|complemento)\\b.*))?$", "i"),
+];
+function normalizeHouseNumber(value: string) {
+  let number = addressPunctuation(value).trim();
+  number = number.replace(numberPrefix, "");
+  if (/^(?:s\s*[/.\-]?\s*n[º°.]?|sem\s+n[úu]mero)$/i.test(number)) return "S/N";
+  return numberPattern.test(number) ? number.replace(/\s+/g, "") : number;
+}
+
 export function normalizeImportRow(input: ImportRow): ImportRow {
   const row = { ...input };
   const notes = new Set((Array.isArray(input.normalization_notes) ? input.normalization_notes : []).filter(note => typeof note === "string"));
@@ -104,12 +125,12 @@ export function normalizeImportRow(input: ImportRow): ImportRow {
     row.cidade = cityUf[1].trim(); row.estado = cityUf[2].toUpperCase(); notes.add("Município e UF separados.");
   }
   {
-    const marked = row.endereco.match(/^(.+?)[,\s]+(?:n(?:ú|u)mero|n[º°o.]|n\.)\s*[:.]?\s*(\d+(?:\s*[-/]\s*\d+)?(?:-?[A-Za-z])?|s\s*\/?\s*n)(?:[,\s]+(.*))?$/i);
-    const comma = row.endereco.match(/^(.+?),\s*(\d+(?:-?[A-Za-z])?|s\s*\/?\s*n)(?:\s*,\s*(.*))?$/i);
-    const plain = row.endereco.match(/^(.+?)[,\s]+(\d+(?:-?[A-Za-z])?|s\s*\/?\s*n)(?:[,\s]+((?:casa|ap(?:to?)?|apartamento|bl(?:oco)?|fundos|sala|lt|lote|qd|quadra|complemento)\b.*))?$/i);
-    const match = marked ?? comma ?? plain;
-    if (match && !/^(rua|r|avenida|av|estrada|travessa|tv)$/i.test(match[1].trim()) && (!row.numero || normalizeText(row.numero) === normalizeText(match[2]))) {
-      row.endereco = match[1].replace(/[,\s]+$/, ""); row.numero = row.numero || match[2].replace(/\s+/g, "");
+    const address = addressPunctuation(row.endereco);
+    row.numero = normalizeHouseNumber(row.numero);
+    const match = addressNumberPatterns.map(pattern => address.match(pattern)).find(Boolean);
+    const street = match?.[1].replace(/[,;|•·:\s-]+$/, "");
+    if (match && street && !/^(rua|r|avenida|av|estrada|travessa|tv|alameda|praca|rodovia|br)$/i.test(street) && !states.has(street.toUpperCase()) && !/\b(?:km|quil[oô]metro)$/i.test(street) && (!row.numero || row.numero.toUpperCase() === normalizeHouseNumber(match[2]).toUpperCase())) {
+      row.endereco = street; row.numero = row.numero || normalizeHouseNumber(match[2]);
       if (match[3] && normalizeText(match[3]) !== normalizeText(row.complemento)) row.complemento = [row.complemento, match[3]].filter(Boolean).join(" · ");
       notes.add("Logradouro, número e complemento separados; confira a prévia.");
     }
