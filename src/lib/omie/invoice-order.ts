@@ -3,11 +3,11 @@ import { withDeliveryInvoiceNote, sameInvoiceNotes } from "@/lib/omie/invoice-no
 import { hasNoReceivablesPolicy, type PaymentOrder } from "@/lib/omie/payment-policy";
 
 export type BillingOutcome = "confirmed" | "submitted" | "unknown" | "rejected" | "blocked";
-export type BillingControlState = "billing_processing" | "billing_submitted" | "billing_unknown" | "billing_rejected";
+export type BillingControlState = "billing_processing" | "billing_submitting" | "billing_submitted" | "billing_unknown" | "billing_rejected";
 export type BillingStatus = {
   codigo_pedido?: number; codigo_pedido_integracao?: string; numero_pedido?: string; etapa?: string;
   faturada?: string; cancelada?: string;
-  ListaNfe?: { numero_nfe?: string; chave_nfe?: string; serie_nfe?: string; protocolo?: string | number; status_nfe?: string; data_emissao?: string; danfe?: string; xml_distr?: string }[];
+  ListaNfe?: { numero_nfe?: string; chave_nfe?: string; serie_nfe?: string; protocolo?: string | number; status_nfe?: string; tipo?: string; data_emissao?: string; danfe?: string; xml_distr?: string }[];
 };
 type Request = <T extends Record<string, unknown>>(endpoint: string, method: string, params: Record<string, unknown>) => Promise<T>;
 type BillingItem = {
@@ -141,6 +141,9 @@ export async function invoiceExistingOrder({ request, orderId, integrationCode, 
     const params = { nCodPed: orderId, cCodIntPed: integrationCode };
     const validation = await request<{ cCodStatus?: string; cDescStatus?: string }>("/produtos/pedidovendafat/", "ValidarPedidoVenda", params);
     if (String(validation.cCodStatus ?? "") !== "0") throw new Error(validation.cDescStatus || "O Omie não aprovou a validação fiscal. Nenhuma emissão foi solicitada.");
+    // Persist the confirmation job before the external mutation. A lost response
+    // is recovered by READS only, never by replaying FaturarPedidoVenda.
+    await settle("billing_submitting");
     requested = true;
     const result = await request<{ cCodStatus?: string; cDescStatus?: string }>("/produtos/pedidovendafat/", "FaturarPedidoVenda", params);
     if (result.cCodStatus != null && String(result.cCodStatus) !== "0") {
@@ -149,10 +152,7 @@ export async function invoiceExistingOrder({ request, orderId, integrationCode, 
     if (String(result.cCodStatus ?? "") !== "0") throw new Error("O Omie não confirmou o resultado da emissão.");
     accepted = true;
     await settle("billing_submitted");
-    const snapshot = await readStatus();
-    return isBilled(snapshot)
-      ? { outcome: "confirmed", message: "Faturamento confirmado no Omie.", snapshot, taxScenarioRefreshRequested }
-      : { outcome: "submitted", message: "O Omie aceitou o faturamento; a confirmação da NF-e está pendente. Use Atualizar Omie, sem reenviar a emissão.", snapshot, taxScenarioRefreshRequested };
+    return { outcome: "submitted", message: "Faturamento aceito pelo Omie. A NF-e será conferida na fila de confirmação, sem repetir a emissão.", taxScenarioRefreshRequested };
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Falha na comunicação com o Omie.";
     const retryAt = (error as { retryAt?: number } | null)?.retryAt;

@@ -181,6 +181,7 @@ function actionsStub(options = {}) {
     '@/lib/omie/order-reference': loadModule('../src/lib/omie/order-reference.ts'),
     '@/lib/omie/invoice-notes': invoiceNotes,
     '@/lib/omie/payment-policy': paymentPolicy,
+    '@/lib/omie/invoice-confirmation': { CONFIRMATION_INTERVAL_MS: 61000, MAX_CONFIRMATION_CHECKS: 20 },
     '@/lib/omie/client': { callOmie: omie.request, OmieApiError: ApiError, OmieConfigurationError: ApiError },
   });
   return { actions, writes, audits, shipments, calls: omie.calls };

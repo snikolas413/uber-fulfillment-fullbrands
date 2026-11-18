@@ -7,7 +7,7 @@ export type BillingListState = Record<BillingQueue, BillingPageInfo>;
 export type BillingPages = Record<BillingQueue, number>;
 
 const preparedColumns = "id, customer_purchase_order, customer_email, created_at, delivery_recipient_name,recipients(full_name), fulfillment_items(product_code, description, quantity, unit_price, line_total)";
-const fiscalColumns = "id, status, omie_order_id, omie_order_number, omie_last_error, created_at, delivery_recipient_name,recipients(full_name), invoices(omie_invoice_number, access_key, status, issued_at, danfe_url, xml_available), shipments(carrier_id, service_code, freight_amount)";
+const fiscalColumns = "id, status, omie_order_id, omie_order_number, omie_last_error, created_at, delivery_recipient_name,recipients(full_name), invoices(omie_invoice_number, access_key, status, issued_at, danfe_url, xml_available, confirmation_state, confirmation_last_error), shipments(carrier_id, service_code, freight_amount)";
 
 export function billingListParams(params: Record<string, string | string[] | undefined>): BillingPages {
   const page = (value: string | string[] | undefined) => typeof value === "string" && /^\d{1,7}$/.test(value) ? Math.max(1, Number(value)) : 1;

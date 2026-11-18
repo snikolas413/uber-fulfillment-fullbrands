@@ -9,6 +9,7 @@ import { simulateItemTaxes, ItemIcmsError } from "@/lib/omie/item-icms";
 import { ORDER_REFERENCE as reference } from "@/lib/omie/order-reference";
 import { DELIVERY_INVOICE_NOTE } from "@/lib/omie/invoice-notes";
 import { initialPaymentSchedule, PAYMENT_TERMS_CODE } from "@/lib/omie/payment-policy";
+import { CONFIRMATION_INTERVAL_MS, MAX_CONFIRMATION_CHECKS, inspectInvoiceConfirmation } from "@/lib/omie/invoice-confirmation";
 
 export type OmieActionResult = { status: "success" | "error" | "warning"; message: string; retryAt?: number };
 type Recipient = { full_name: string; document_number: string | null; email: string | null; phone: string | null };
@@ -22,7 +23,7 @@ type Fulfillment = {
   omie_last_error?: string | null;
   recipients: Recipient | Recipient[] | null; delivery_addresses: Address | Address[] | null; fulfillment_items: Item[] | null;
 };
-type OmieInvoice = { chave_nfe?: string; numero_nfe?: string; serie_nfe?: string; protocolo?: string | number; status_nfe?: string; data_emissao?: string; danfe?: string; xml_distr?: string };
+type OmieInvoice = { chave_nfe?: string; numero_nfe?: string; serie_nfe?: string; protocolo?: string | number; status_nfe?: string; tipo?: string; data_emissao?: string; danfe?: string; xml_distr?: string };
 type OmieStatus = { codigo_pedido?: number; codigo_pedido_integracao?: string; numero_pedido?: string; etapa?: string; faturada?: string; cancelada?: string; ListaNfe?: OmieInvoice[] };
 type OmieOrder = { codigo_pedido?: number; numero_pedido?: string; codigo_pedido_integracao?: string };
 type OmiePedido = {
@@ -384,7 +385,12 @@ export async function syncOmieOrderAction(id: string): Promise<OmieActionResult>
     }
     const status = await statusFromOmie(row);
     if (!hasOmieOrder(status)) return { status: "warning", message: "O Omie não retornou esse pedido. Confira o ERP antes de reenviar." };
-    return await reconcile(supabase, userId, row, status);
+    const reconciled = await reconcile(supabase, userId, row, status);
+    if (row.omie_order_id && status.faturada === "S" && inspectInvoiceConfirmation(status, row.omie_order_id, integrationCode(row.id)).confirmed) {
+      await supabase.from("invoices").update({ confirmation_state: "confirmed", confirmation_last_error: null, confirmation_next_check_at: null })
+        .eq("fulfillment_id", id).in("confirmation_state", ["pending", "error"]);
+    }
+    return reconciled;
   } catch (error) {
     await reportFailure?.(error);
     return { status: "error", message: errorMessage(error), ...retryMetadata(error) };
@@ -411,7 +417,7 @@ export async function invoiceOrderAction(id: string, confirmed = false): Promise
       if (!inserted.error && inserted.data) { claimId = inserted.data.id; return true; }
       if (inserted.error?.code !== "23505") throw new Error("Não foi possível reservar o faturamento deste pedido.");
       // A unique fulfillment_id prevents concurrent requests; only a pre-emission refusal can be retried.
-      const retried = await supabase.from("invoices").update({ status: "billing_processing" }).eq("fulfillment_id", id)
+      const retried = await supabase.from("invoices").update({ status: "billing_processing", confirmation_state: "none", confirmation_attempts: 0, confirmation_last_error: null }).eq("fulfillment_id", id)
         .eq("status", "billing_rejected").is("omie_invoice_number", null).is("access_key", null).select("id").maybeSingle();
       if (retried.error) throw new Error("Não foi possível conferir a reserva de faturamento.");
       claimId = retried.data?.id ?? null;
@@ -419,24 +425,99 @@ export async function invoiceOrderAction(id: string, confirmed = false): Promise
     };
     const settle = async (state: BillingControlState) => {
       if (!claimId) throw new Error("Reserva de faturamento não confirmada.");
-      const { error } = await supabase.from("invoices").update({ status: state }).eq("id", claimId)
-        .in("status", ["billing_processing", "billing_submitted"]).is("omie_invoice_number", null).is("access_key", null);
+      const queued = ["billing_submitting", "billing_submitted", "billing_unknown"].includes(state);
+      const { error } = await supabase.from("invoices").update({ status: state,
+        confirmation_state: queued ? "pending" : "none",
+        confirmation_next_check_at: queued ? new Date(Date.now() + CONFIRMATION_INTERVAL_MS).toISOString() : null,
+        confirmation_last_error: null,
+      }).eq("id", claimId)
+        .in("status", ["billing_processing", "billing_submitting", "billing_submitted"]).is("omie_invoice_number", null).is("access_key", null);
       if (error) throw new Error("Não foi possível salvar o controle de faturamento.");
     };
-    const result = await invoiceExistingOrder({ request: callOmie, orderId: row.omie_order_id, integrationCode: integrationCode(id), carrierId, claim, settle });
+    let result = await invoiceExistingOrder({ request: callOmie, orderId: row.omie_order_id, integrationCode: integrationCode(id), carrierId, claim, settle });
+    if (result.outcome === "confirmed" && !result.snapshot?.ListaNfe?.some(note => note.numero_nfe && note.chave_nfe)) {
+      result = { ...result, outcome: "submitted", snapshot: undefined, message: "O Omie informou faturamento. Aguardando os dados da NF-e na fila de confirmação." };
+    }
+    if (result.outcome === "submitted" && !claimId) {
+      const { error: initError } = await supabase.from("invoices").upsert({ fulfillment_id: id, status: "billing_submitted",
+        confirmation_state: "pending", confirmation_next_check_at: new Date(Date.now() + CONFIRMATION_INTERVAL_MS).toISOString() },
+      { onConflict: "fulfillment_id", ignoreDuplicates: true });
+      if (initError) throw new Error("Não foi possível registrar a confirmação pendente. Atualize o pedido sem reenviar a emissão.");
+      await supabase.from("invoices").update({ confirmation_state: "pending", confirmation_next_check_at: new Date(Date.now() + CONFIRMATION_INTERVAL_MS).toISOString() })
+        .eq("fulfillment_id", id).eq("confirmation_state", "none").in("status", ["billing_submitted", "billing_unknown"]);
+    }
     let message = result.message;
-    let status: OmieActionResult["status"] = result.outcome === "confirmed" ? "success" : "warning";
+    let status: OmieActionResult["status"] = ["confirmed", "submitted"].includes(result.outcome) ? "success" : "warning";
     if (result.snapshot) {
       try { await reconcile(supabase, userId, row, result.snapshot); }
       catch { message += " Não foi possível atualizar a cópia local. Consulte o Omie antes de repetir."; status = "warning"; }
     }
     await audit(supabase, userId, id, "omie.invoice.result", { omie_order_id: row.omie_order_id, outcome: result.outcome, ...retryMetadata(result), required_invoice_note: DELIVERY_INVOICE_NOTE, tax_scenario_refresh_requested: Boolean(result.taxScenarioRefreshRequested), message: message.slice(0, 500) });
-    await supabase.from("fulfillments").update({ omie_last_error: status === "success" ? null : ("Faturamento: " + message).slice(0, 500) }).eq("id", id);
+    if (["submitted", "unknown"].includes(result.outcome)) {
+      await supabase.from("fulfillments").update({ status: "billing_pending" }).eq("id", id).in("status", ["order_created", "billing_pending"]);
+    }
+    await supabase.from("fulfillments").update({
+      omie_last_error: status === "success" ? null : ("Faturamento: " + message).slice(0, 500),
+    }).eq("id", id);
     revalidatePath("/faturamento"); revalidatePath("/pedidos");
     return { status, message, billingOutcome: result.outcome, ...retryMetadata(result) };
   } catch (error) {
     await reportFailure?.(error);
     return { status: "error", message: errorMessage(error), ...retryMetadata(error) };
+  }
+}
+
+export type InvoiceConfirmationResult = OmieActionResult & {
+  hasJob: boolean; id?: string; billingOutcome?: BillingOutcome; invoiceNumber?: string;
+  confirmationState?: "pending" | "confirmed" | "error";
+};
+
+/** Claims one due READ job. Never calls validation, inclusion or billing methods. */
+export async function processNextInvoiceConfirmationAction(): Promise<InvoiceConfirmationResult> {
+  try {
+    const { supabase, userId } = await context();
+    const lease = crypto.randomUUID();
+    const claimed = await supabase.rpc("claim_invoice_confirmation", { p_lease: lease });
+    if (claimed.error) throw new Error("Não foi possível consultar a fila de confirmação da NF-e.");
+    if (!claimed.data) return { hasJob: false, status: "success", message: "Nenhuma confirmação vencida." };
+    const job = claimed.data as { invoice_id: string; fulfillment_id: string; attempts: number };
+    const finish = async (state: "pending" | "confirmed" | "error", message: string | null, attempted: boolean, nextAt = Date.now() + CONFIRMATION_INTERVAL_MS) => {
+      const { data, error } = await supabase.rpc("finish_invoice_confirmation", {
+        p_invoice_id: job.invoice_id, p_lease: lease, p_state: state,
+        p_next_check_at: state === "pending" ? new Date(nextAt).toISOString() : null,
+        p_message: message?.slice(0, 1200) ?? null, p_attempted: attempted,
+      });
+      if (error || data !== true) throw new Error("A reserva da confirmação expirou. A emissão permanece protegida; atualize a página.");
+    };
+    try {
+      const row = await load(supabase, job.fulfillment_id);
+      if (!row.omie_order_id) throw new Error("Pedido sem referência Omie para confirmar a NF-e.");
+      const snapshot = await callOmie<OmieStatus>("/produtos/pedido/", "StatusPedido", {
+        codigo_pedido: row.omie_order_id, codigo_pedido_integracao: integrationCode(row.id),
+      }, { background: true });
+      const inspection = inspectInvoiceConfirmation(snapshot, row.omie_order_id, integrationCode(row.id));
+      if (inspection.confirmed) {
+        await reconcile(supabase, userId, row, { ...snapshot, ListaNfe: [inspection.invoice] });
+        await finish("confirmed", null, true);
+        await audit(supabase, userId, row.id, "omie.invoice.confirmed", { omie_order_id: row.omie_order_id, invoice_number: inspection.invoice.numero_nfe, no_emission_requested: true });
+        return { hasJob: true, id: row.id, status: "success", billingOutcome: "confirmed", confirmationState: "confirmed",
+          invoiceNumber: inspection.invoice.numero_nfe, message: "NF-e " + inspection.invoice.numero_nfe + " autorizada e sincronizada." };
+      }
+      if (job.attempts + 1 >= MAX_CONFIRMATION_CHECKS) throw new Error("A NF-e ainda não foi confirmada após 20 consultas. Confira o pedido no Omie e use Atualizar Omie; nenhuma emissão foi repetida.");
+      await finish("pending", null, true);
+      return { hasJob: true, id: row.id, status: "success", billingOutcome: "submitted", confirmationState: "pending", message: "Aguardando confirmação da NF-e no Omie." };
+    } catch (error) {
+      if (error instanceof OmieApiError && error.code === "LOCAL_PAUSE" && error.requestStarted === false && error.retryAt) {
+        await finish("pending", null, false, error.retryAt);
+        return { hasJob: true, id: job.fulfillment_id, status: "success", billingOutcome: "submitted", confirmationState: "pending", message: "Confirmação aguardando a janela disponível da API." };
+      }
+      const message = errorMessage(error);
+      await finish("error", message, true);
+      await failureReporter({ supabase, userId }, job.fulfillment_id, "Confirmação NF-e")(error);
+      return { hasJob: true, id: job.fulfillment_id, status: "warning", billingOutcome: "unknown", confirmationState: "error", message };
+    }
+  } catch (error) {
+    return { hasJob: false, status: "error", message: errorMessage(error) };
   }
 }
 

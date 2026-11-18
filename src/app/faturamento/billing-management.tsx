@@ -1,15 +1,15 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileCheck2, FileText, LoaderCircle } from "lucide-react";
-import { invoiceOrderAction } from "@/app/pedidos/omie-actions";
+import { invoiceOrderAction, processNextInvoiceConfirmationAction } from "@/app/pedidos/omie-actions";
 import { OmieActionButton } from "@/components/omie-action-button";
 import { runBillingBatch } from "@/lib/omie/billing-batch";
 import { isMiniEnviosName } from "@/lib/omie/freight-selection";
 import { billingPageUrl, type BillingListState } from "@/lib/billing-list";
 
-type InvoiceRecord = { omie_invoice_number: string | null; access_key: string | null; status: string; issued_at: string | null; danfe_url: string | null; xml_available: boolean };
+type InvoiceRecord = { omie_invoice_number: string | null; access_key: string | null; status: string; issued_at: string | null; danfe_url: string | null; xml_available: boolean; confirmation_state?: string; confirmation_last_error?: string | null };
 type Shipment = { carrier_id: string | null; service_code: string | null; freight_amount: number | null };
 export type BillingRow = {
   delivery_recipient_name?: string | null;
@@ -17,7 +17,7 @@ export type BillingRow = {
   created_at: string; recipients: { full_name: string } | null;
   invoices: InvoiceRecord | InvoiceRecord[] | null; shipments: Shipment | Shipment[] | null;
 };
-type Result = Awaited<ReturnType<typeof invoiceOrderAction>>;
+type Result = Awaited<ReturnType<typeof invoiceOrderAction>> & { invoiceNumber?: string };
 const first = <T,>(value: T | T[] | null) => Array.isArray(value) ? value[0] ?? null : value;
 const date = (value: string | null) => value && Number.isFinite(Date.parse(value)) ? new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(new Date(value)) : "—";
 
@@ -44,6 +44,34 @@ export function BillingManagement({ rows, canBill, list }: { rows: BillingRow[];
   const [batchIds, setBatchIds] = useState<string[]>([]);
   const runningRef = useRef(false);
   const stopRef = useRef(false);
+  const [confirmationNotice, setConfirmationNotice] = useState("");
+  // This independent loop only reads due confirmation jobs. It never submits
+  // invoices and resumes persisted jobs when the billing page is reopened.
+  useEffect(() => {
+    if (!canBill) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      try {
+        const result = await processNextInvoiceConfirmationAction();
+        if (stopped) return;
+        if (result.status === "error" && !result.hasJob) { setConfirmationNotice(result.message); return; }
+        setConfirmationNotice("");
+        if (result.hasJob && result.id) {
+          const id = result.id;
+          setResults(previous => ({ ...previous, [id]: result }));
+          // Refresh only outside submission: changing a paginated queue during
+          // a batch could unmount the component that owns the selected IDs.
+          if (!runningRef.current && result.confirmationState !== "pending") router.refresh();
+        }
+      } catch {
+        if (!stopped) setConfirmationNotice("Não foi possível consultar a fila de confirmação. As emissões permanecem protegidas contra repetição.");
+      }
+      if (!stopped) timer = setTimeout(tick, 5000);
+    };
+    timer = setTimeout(tick, 1000);
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [canBill, router]);
   const eligible = rows.filter(row => !blockedReason(row, results[row.id]));
   const selectedRows = eligible.filter(row => selected.has(row.id));
   const allSelected = eligible.length > 0 && eligible.every(row => selected.has(row.id));
@@ -51,6 +79,7 @@ export function BillingManagement({ rows, canBill, list }: { rows: BillingRow[];
   const batchResults = batchIds.flatMap(id => results[id] ? [results[id]] : []);
   const completed = batchResults.length;
   const confirmed = batchResults.filter(result => result.billingOutcome === "confirmed").length;
+  const awaiting = batchResults.filter(result => result.billingOutcome === "submitted").length;
   const pages = { prepared: list.prepared.page, pending: list.pending.page, billed: list.billed.page };
 
   async function run() {
@@ -90,11 +119,13 @@ export function BillingManagement({ rows, canBill, list }: { rows: BillingRow[];
       </div>}
     </div>
     {total > 0 && <div className="billing-progress" role="status" aria-live="polite">
-      <strong>{running ? "Processando" : "Lote encerrado"}: {completed} de {total} pedido(s)</strong>
-      <span>{confirmed} confirmado(s) no Omie · {completed - confirmed} com aviso ou pendência</span>
+      <strong>{running ? "Enviando lote" : awaiting ? "Envio concluído; aguardando NF-e" : "Lote concluído"}: {completed} de {total} pedido(s)</strong>
+      <span>{confirmed} NF-e(s) confirmada(s) · {awaiting} aguardando confirmação · {completed - confirmed - awaiting} com aviso ou erro</span>
       {waitingUntil && <small>Aguardando liberação da API até {new Date(waitingUntil).toLocaleTimeString("pt-BR")}. O lote seguirá para o próximo pedido.</small>}
-      {running && <small>Mantenha esta página aberta. O lote é processado um pedido por vez.</small>}
+      {running && <small>Mantenha esta página aberta. O lote segue após o aceite; a NF-e é conferida em uma fila separada.</small>}
     </div>}
+    <div className="orders-notice"><p>As confirmações são consultadas enquanto esta página estiver aberta, sem repetir a emissão. Pendências ficam salvas e a conferência continua ao reabrir Faturamento.</p></div>
+    {confirmationNotice && <div role="status" className="recipient-alert recipient-alert-error">{confirmationNotice} Atualize a página para retomar a conferência.</div>}
     {rows.length ? <div className="orders-table-wrap"><table className="orders-table billing-table">
       <thead><tr>
         {canBill && <th><input type="checkbox" aria-label="Selecionar todos os pedidos disponíveis" checked={allSelected} disabled={running || !eligible.length}
@@ -112,13 +143,14 @@ export function BillingManagement({ rows, canBill, list }: { rows: BillingRow[];
             })} /></td>}
           <td><strong>{row.delivery_recipient_name ?? row.recipients?.full_name ?? "Destinatário indisponível"}</strong><small>{date(row.created_at)}</small></td>
           <td>{row.omie_order_number ? "#" + row.omie_order_number : "Aguardando número"}</td>
-          <td><span className={`order-status order-status-${row.status}`}>{row.status === "billed" ? "Faturado" : invoice?.status.startsWith("billing_") && invoice.status !== "billing_rejected" ? "Conferir emissão" : "Aguardando faturamento"}</span></td>
-          <td><strong>{invoice?.omie_invoice_number || "—"}</strong><small>{invoice?.danfe_url ? <a href={invoice.danfe_url} target="_blank" rel="noreferrer">Abrir DANFE</a> : "DANFE não disponível"}</small><small>{invoice?.xml_available ? "XML disponível no Omie" : "XML ainda não recebido"}</small></td>
+          <td><span className={`order-status order-status-${row.status}`}>{result?.billingOutcome === "confirmed" || (row.status === "billed" && invoice?.omie_invoice_number && invoice.access_key) ? "Faturado" : result?.billingOutcome === "submitted" || ["pending", "checking"].includes(invoice?.confirmation_state ?? "") ? "Aguardando confirmação da NF-e" : invoice?.confirmation_state === "error" ? "Conferir confirmação" : row.status === "billed" ? "Faturado" : invoice?.status.startsWith("billing_") && invoice.status !== "billing_rejected" ? "Conferir emissão" : "Aguardando faturamento"}</span></td>
+          <td><strong>{result?.invoiceNumber || invoice?.omie_invoice_number || "—"}</strong><small>{invoice?.danfe_url ? <a href={invoice.danfe_url} target="_blank" rel="noreferrer">Abrir DANFE</a> : "DANFE não disponível"}</small><small>{invoice?.xml_available ? "XML disponível no Omie" : "XML ainda não recebido"}</small></td>
           <td>{date(invoice?.issued_at ?? null)}</td>
           <td>
             {activeId === row.id && <small role="status">Processando este pedido...</small>}
             {result && <small className={`omie-action-result omie-action-result-${result.status}`}>{result.message}</small>}
             {!result && row.omie_last_error && <small className="omie-action-result omie-action-result-warning">{row.omie_last_error}</small>}
+            {!result && !row.omie_last_error && invoice?.confirmation_last_error && <small className="omie-action-result omie-action-result-warning">{invoice.confirmation_last_error}</small>}
             {!result && !row.omie_last_error && blocked && <small>{blocked}</small>}
             {!running && <OmieActionButton fulfillmentId={row.id} kind="sync-order" size="small" />}
           </td>

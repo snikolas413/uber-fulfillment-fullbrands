@@ -48,3 +48,9 @@ test('reserva ocupada indefinidamente tem espera limitada', async () => {
   await assert.rejects(h.acquire());
   assert.equal(h.waits.length, 125);
 });
+
+test('confirmação em background não ocupa a fila esperando a reserva de outra operação', async()=>{
+  const h=reservation({busy:3});
+  await assert.rejects(h.acquire({waitForBusy:false}));
+  assert.equal(h.calls(),1);assert.deepEqual(h.waits,[]);
+});

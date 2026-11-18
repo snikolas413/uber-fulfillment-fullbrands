@@ -80,6 +80,19 @@ test('401 Bearer não renova nem repete a operação recusada na mesma ação', 
   }, { bearer: true });
 });
 
+test('consulta de confirmação recente é adiada com metadados sem chamar Omie nem atrasar outro pedido',async()=>{
+  await withClient(async h=>{
+    h.fetch(()=>new Response(JSON.stringify({codigo_pedido:1})));
+    await h.client.callOmie('/produtos/pedido/','StatusPedido',{codigo_pedido:1});
+    await assert.rejects(h.client.callOmie('/produtos/pedido/','StatusPedido',{codigo_pedido:1},{background:true}),error=>{
+      assert.equal(error.code,'LOCAL_PAUSE');assert.equal(error.requestStarted,false);assert.ok(error.retryAt);return true;
+    });
+    assert.equal(h.calls.length,1);
+    await h.client.callOmie('/produtos/pedido/','StatusPedido',{codigo_pedido:2});
+    assert.equal(h.calls.length,2);
+  });
+});
+
 test('cliente reaproveita sucesso de cadastro, sem cache de inclusão de pedido', async () => {
   await withClient(async h => {
     h.fetch(() => new Response(JSON.stringify({ codigo_cliente_omie: 123 })));

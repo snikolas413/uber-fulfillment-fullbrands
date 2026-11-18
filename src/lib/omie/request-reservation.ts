@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { OmieRequestPausedError } from "@/lib/omie/request-control";
 
-export async function acquireOmieRequest() {
+export async function acquireOmieRequest(options?: { waitForBusy?: boolean }) {
   const lease = randomUUID();
   const db = createSupabaseAdminClient();
   const deadline = Date.now() + 125_000;
@@ -18,7 +18,7 @@ export async function acquireOmieRequest() {
       const { data: control, error: controlError } = await db.from("omie_api_control")
         .select("paused_until").eq("singleton", true).single();
       const retryAt = Date.parse(data.retry_at);
-      if (controlError || !control || Date.parse(control.paused_until) > Date.now() || Date.now() >= deadline) {
+      if (options?.waitForBusy === false || controlError || !control || Date.parse(control.paused_until) > Date.now() || Date.now() >= deadline) {
         throw new OmieRequestPausedError(Number.isFinite(retryAt) ? retryAt : Date.now() + 120_000);
       }
       await new Promise(resolve => setTimeout(resolve, 1000));

@@ -125,3 +125,15 @@ test('falha ao liberar reserva após resposta não repete a escrita e bloqueia p
   await assert.rejects(control('/api/', 'IncluirPedido', {}, async () => { calls++; }));
   assert.equal(calls, 1);
 });
+
+test('confirmação em background adia leitura recente sem bloquear a fila de novos pedidos',async()=>{
+  const h=harness();
+  await h.control('/pedido/','StatusPedido',{id:1},async()=>'ok');
+  const at=h.time();
+  await assert.rejects(h.control('/pedido/','StatusPedido',{id:1},()=>assert.fail('Não deve chamar cedo'),{background:true}),error=>{
+    assert.equal(error.requestStarted,false);assert.ok(error.retryAt>at);return true;
+  });
+  assert.equal(h.time(),at);
+  assert.equal(await h.control('/pedido/','ValidarPedidoVenda',{id:2},async()=>'next'),'next');
+  assert.equal(h.time()-at,300);
+});

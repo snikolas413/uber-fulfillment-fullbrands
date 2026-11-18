@@ -39,6 +39,7 @@ export class OmieApiError extends Error {
     public readonly httpStatus?: number,
     public readonly retryAfterSeconds?: number,
     public readonly retryAt?: number,
+    public readonly requestStarted?: boolean,
   ) {
     super(message);
     this.name = "OmieApiError";
@@ -346,11 +347,12 @@ export async function callOmie<T extends Record<string, unknown>>(
   endpoint: string,
   method: string,
   params: Record<string, unknown> = {},
+  options?: { background?: boolean },
 ): Promise<T> {
   try {
-    return await controlledRequest(endpoint, method, params, () => callOmieOnce<T>(endpoint, method, params));
+    return await controlledRequest(endpoint, method, params, () => callOmieOnce<T>(endpoint, method, params), options);
   } catch (error) {
-    if (error instanceof OmieRequestPausedError) throw new OmieApiError(error.message, "LOCAL_PAUSE", undefined, undefined, error.retryAt);
+    if (error instanceof OmieRequestPausedError) throw new OmieApiError(error.message, "LOCAL_PAUSE", undefined, undefined, error.retryAt, error.requestStarted);
     throw error;
   }
 }

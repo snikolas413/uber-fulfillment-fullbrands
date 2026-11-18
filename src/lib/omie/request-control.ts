@@ -5,7 +5,7 @@ const READ_WINDOW_MS = 61_000;
 const MAX_ENTRIES = 500;
 
 export class OmieRequestPausedError extends Error {
-  constructor(public readonly retryAt: number, reason?: string) {
+  constructor(public readonly retryAt: number, reason?: string, public readonly requestStarted = false) {
     super((reason ? reason + " " : "") + "Integração pausada para proteger o acesso ao Omie. Tente novamente após " +
       new Date(retryAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }) + ". O pedido não será reenviado automaticamente.");
   }
@@ -36,7 +36,7 @@ function stable(value: unknown): string {
 }
 
 export function createOmieRequestControl({ acquire, finish, now = Date.now, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) }: {
-  acquire: () => Promise<{ lease: string; waitMs: number }>;
+  acquire: (options?: { waitForBusy?: boolean }) => Promise<{ lease: string; waitMs: number }>;
   finish: (lease: string, pause: number) => Promise<void>;
   now?: () => number;
   wait?: (ms: number) => Promise<unknown>;
@@ -47,7 +47,7 @@ export function createOmieRequestControl({ acquire, finish, now = Date.now, wait
   const reads = new Map<string, number>();
   const trim = <T>(map: Map<string, T>) => { while (map.size > MAX_ENTRIES) map.delete(map.keys().next().value!); };
 
-  return function controlled<T>(endpoint: string, method: string, params: Record<string, unknown>, request: () => Promise<T>): Promise<T> {
+  return function controlled<T>(endpoint: string, method: string, params: Record<string, unknown>, request: () => Promise<T>, options?: { background?: boolean }): Promise<T> {
     const key = endpoint + ":" + method + ":" + stable(params);
     const task = queue.then(async () => {
       if (pausedUntil > now()) throw new OmieRequestPausedError(pausedUntil);
@@ -57,8 +57,9 @@ export function createOmieRequestControl({ acquire, finish, now = Date.now, wait
       // Fresh checks after writes must never use a stale order or invoice snapshot.
       // Wait BEFORE making the new call, rather than causing REDUNDANT and retrying it.
       const readWait = (reads.get(key) ?? 0) - now();
+      if (readWait > 0 && options?.background) throw new OmieRequestPausedError(now() + readWait, "Aguardando a janela desta consulta.");
       if (readWait > 0) await wait(readWait);
-      const reservation = await acquire();
+      const reservation = await acquire({ waitForBusy: !options?.background });
       if (reservation.waitMs > 0) await wait(reservation.waitMs);
       let result: T;
       try {
@@ -74,14 +75,14 @@ export function createOmieRequestControl({ acquire, finish, now = Date.now, wait
           reads.set(key, now() + Math.max(61, seconds + 1) * 1000); trim(reads);
         }
         try { await finish(reservation.lease, seconds); }
-        catch { pausedUntil = Math.max(pausedUntil, now() + 120_000); throw new OmieRequestPausedError(pausedUntil, message); }
-        if (seconds > 0) throw new OmieRequestPausedError(pausedUntil, message || "Falha na comunicação com o Omie.");
+        catch { pausedUntil = Math.max(pausedUntil, now() + 120_000); throw new OmieRequestPausedError(pausedUntil, message, true); }
+        if (seconds > 0) throw new OmieRequestPausedError(pausedUntil, message || "Falha na comunicação com o Omie.", true);
         throw error;
       }
       try { await finish(reservation.lease, 0); }
       catch {
         pausedUntil = now() + 120_000;
-        throw new OmieRequestPausedError(pausedUntil, "A resposta chegou, mas não foi possível liberar a reserva da integração. Confira o pedido antes de repetir.");
+        throw new OmieRequestPausedError(pausedUntil, "A resposta chegou, mas não foi possível liberar a reserva da integração. Confira o pedido antes de repetir.", true);
       }
       if (cachedReads.has(method)) {
         cache.set(key, { until: now() + READ_WINDOW_MS, value: structuredClone(result) });

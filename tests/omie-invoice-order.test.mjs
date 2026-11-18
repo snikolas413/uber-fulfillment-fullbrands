@@ -74,7 +74,7 @@ function omie(options = {}) {
     throw new Error('Método inesperado: ' + method);
   };
   const claim = async () => { if (locked || options.claimDenied) return false; locked = true; return true; };
-  const settle = async state => { states.push(state); };
+  const settle = async state => { states.push(state); if (state === 'billing_submitting' && options.queuePersistError) throw new Error('Fila indisponível'); };
   const args = { request, orderId: 555, integrationCode, carrierId: 123, claim, settle };
   return { args, calls, states };
 }
@@ -82,20 +82,20 @@ function omie(options = {}) {
 test('fatura pedido existente com contrato correto, validação e conferência, sem criar pedido ou mudar cenário', async () => {
   const { args, calls, states } = omie({ omitFreight: true });
   const result = await billing.invoiceExistingOrder(args);
-  assert.equal(result.outcome, 'confirmed');
-  assert.equal(result.snapshot.ListaNfe[0].numero_nfe, '123');
-  assert.deepEqual(calls.map(call => call.method), ['ConsultarPedido', 'TrocarEtapaPedido', 'StatusPedido', 'ValidarPedidoVenda', 'FaturarPedidoVenda', 'StatusPedido']);
+  assert.equal(result.outcome, 'submitted');
+  assert.equal(result.snapshot, undefined);
+  assert.deepEqual(calls.map(call => call.method), ['ConsultarPedido', 'TrocarEtapaPedido', 'StatusPedido', 'ValidarPedidoVenda', 'FaturarPedidoVenda']);
   const params = { nCodPed: 555, cCodIntPed: integrationCode };
   assert.deepEqual(calls.find(call => call.method === 'ValidarPedidoVenda').params, params);
   assert.deepEqual(calls.find(call => call.method === 'FaturarPedidoVenda').params, params);
   assert.deepEqual(calls.find(call => call.method === 'TrocarEtapaPedido').params, { codigo_pedido: 555, codigo_pedido_integracao: integrationCode, etapa: '50' });
-  assert.deepEqual(states, ['billing_submitted']);
+  assert.deepEqual(states, ['billing_submitting', 'billing_submitted']);
   assert.ok(!calls.some(call => ['IncluirPedido', 'AlterarPedidoVenda', 'GerarEtiqueta'].includes(call.method)));
 });
 
 test('não muda etapa já preparada nem reemite pedido já faturado', async () => {
   const prepared = omie({ stage: '50' });
-  assert.equal((await billing.invoiceExistingOrder(prepared.args)).outcome, 'confirmed');
+  assert.equal((await billing.invoiceExistingOrder(prepared.args)).outcome, 'submitted');
   assert.ok(!prepared.calls.some(call => call.method === 'TrocarEtapaPedido'));
   const billed = omie({ alreadyBilled: true });
   assert.equal((await billing.invoiceExistingOrder(billed.args)).outcome, 'confirmed');
@@ -118,14 +118,14 @@ test('erro em cada etapa encerra só aquele pedido, preserva prazo e não faz as
     assert.equal(calls.at(-1), failed);
     assert.equal(calls.filter(method => method === failed).length, 1);
     assert.match(result.message, new RegExp(failed));
-    assert.equal((await billing.invoiceExistingOrder(omie().args)).outcome, 'confirmed');
+    assert.equal((await billing.invoiceExistingOrder(omie().args)).outcome, 'submitted');
   }
 });
 
 test('pedidos antigos recebem a frase antes de faturar, com releitura e preservação das observações', async () => {
   for (const notes of ['', 'Observação anterior|Entrega a consumidor final']) {
     const { args, calls } = omie({ notes });
-    assert.equal((await billing.invoiceExistingOrder(args)).outcome, 'confirmed');
+    assert.equal((await billing.invoiceExistingOrder(args)).outcome, 'submitted');
     const updates = calls.filter(call => call.method === 'AlterarPedidoVenda');
     assert.equal(updates.length, 1);
     assert.deepEqual(updates[0].params, {
@@ -146,10 +146,10 @@ test('frase não é duplicada e atualização de impostos e observação ocorre 
   assert.equal(invoiceNotes.sameInvoiceNotes(notes.replace('|', '\n'), notes), true);
   assert.equal(invoiceNotes.sameInvoiceNotes(invoiceNotes.DELIVERY_INVOICE_NOTE, notes), false);
   const existing = omie({ notes });
-  assert.equal((await billing.invoiceExistingOrder(existing.args)).outcome, 'confirmed');
+  assert.equal((await billing.invoiceExistingOrder(existing.args)).outcome, 'submitted');
   assert.ok(!existing.calls.some(call => call.method === 'AlterarPedidoVenda'));
   const missing = omie({ notes: 'Observação anterior', missingIcms: true });
-  assert.equal((await billing.invoiceExistingOrder(missing.args)).outcome, 'confirmed');
+  assert.equal((await billing.invoiceExistingOrder(missing.args)).outcome, 'submitted');
   const updates = missing.calls.filter(call => call.method === 'AlterarPedidoVenda');
   assert.equal(updates.length, 1);
   assert.ok(updates[0].params.det);
@@ -175,7 +175,7 @@ test('ICMS ausente reaplica o cenário já escolhido, preservando dados e endere
   for (const simples of [false, true]) {
     const { args, calls } = omie({ missingIcms: true, simples });
     const result = await billing.invoiceExistingOrder(args);
-    assert.equal(result.outcome, 'confirmed');
+    assert.equal(result.outcome, 'submitted');
     assert.equal(result.taxScenarioRefreshRequested, true);
     const refresh = calls.find(call => call.method === 'AlterarPedidoVenda');
     assert.deepEqual(refresh.params, { cabecalho: { codigo_pedido: 555, codigo_pedido_integracao: integrationCode }, det: [{
@@ -224,7 +224,7 @@ test('bloqueia cancelamento, vínculo, frete, etapa, status fiscal e validação
 test('reserva exclusiva permite somente uma emissão em tentativas concorrentes', async () => {
   const { args, calls } = omie();
   const results = await Promise.all([billing.invoiceExistingOrder(args), billing.invoiceExistingOrder(args)]);
-  assert.deepEqual(results.map(result => result.outcome).sort(), ['blocked', 'confirmed']);
+  assert.deepEqual(results.map(result => result.outcome).sort(), ['blocked', 'submitted']);
   assert.equal(calls.filter(call => call.method === 'FaturarPedidoVenda').length, 1);
 });
 
@@ -232,7 +232,7 @@ test('timeout, recusa ou resposta incompleta na emissão ficam sem confirmação
   for (const options of [{ timeout: true }, { invoiceResponse: {} }, { invoiceResponse: { cCodStatus: '100', cDescStatus: 'Em processamento' } }]) {
     const { args, calls, states } = omie(options);
     assert.equal((await billing.invoiceExistingOrder(args)).outcome, 'unknown');
-    assert.deepEqual(states, ['billing_unknown']);
+    assert.deepEqual(states, ['billing_submitting', 'billing_unknown']);
     assert.equal(calls.filter(call => call.method === 'FaturarPedidoVenda').length, 1);
   }
 });
@@ -242,7 +242,7 @@ test('aceite com nota pendente ou falha posterior é submetido, sem declarar NF-
     const { args, calls, states } = omie(options);
     const result = await billing.invoiceExistingOrder(args);
     assert.equal(result.outcome, 'submitted');
-    assert.ok(states.every(state => state === 'billing_submitted'));
+    assert.deepEqual(states, ['billing_submitting', 'billing_submitted']);
     assert.equal(calls.filter(call => call.method === 'FaturarPedidoVenda').length, 1);
   }
 });
@@ -298,6 +298,7 @@ function actionHarness(options = {}) {
     '@/lib/omie/order-reference': loadModule('../src/lib/omie/order-reference.ts'),
     '@/lib/omie/invoice-notes': invoiceNotes,
     '@/lib/omie/payment-policy': paymentPolicy,
+    '@/lib/omie/invoice-confirmation': { CONFIRMATION_INTERVAL_MS: 61000, MAX_CONFIRMATION_CHECKS: 20 },
     '@/lib/omie/client': { callOmie: upstream.args.request, OmieApiError: ApiError, OmieConfigurationError: ApiError },
   });
   return { actions, records, calls: upstream.calls };
@@ -314,10 +315,12 @@ test('ação exige confirmação, sessão, perfil ativo e frete confirmado no se
   }
 });
 
-test('ação persiste NF confirmada, mantém bloqueio após timeout e só retoma rejeição antes de emitir', async () => {
+test('ação persiste aceite na fila, mantém bloqueio após timeout e só retoma rejeição antes de emitir', async () => {
   const success = actionHarness();
-  assert.equal((await success.actions.invoiceOrderAction(id, true)).billingOutcome, 'confirmed');
-  assert.equal(success.records.invoice.omie_invoice_number, '123');
+  assert.equal((await success.actions.invoiceOrderAction(id, true)).billingOutcome, 'submitted');
+  assert.equal(success.records.invoice.omie_invoice_number, null);
+  assert.equal(success.records.invoice.confirmation_state, 'pending');
+  assert.ok(success.records.invoice.confirmation_next_check_at);
   assert.equal(success.records.writes.at(-1).omie_last_error, null);
   assert.equal(success.records.audits.at(-1).action, 'omie.invoice.result');
   const timeout = actionHarness({ timeout: true });
@@ -326,7 +329,31 @@ test('ação persiste NF confirmada, mantém bloqueio após timeout e só retoma
   assert.equal((await timeout.actions.invoiceOrderAction(id, true)).billingOutcome, 'blocked');
   assert.equal(timeout.calls.filter(call => call.method === 'FaturarPedidoVenda').length, 1);
   const rejected = actionHarness({ invoice: { status: 'billing_rejected', fulfillment_id: id, omie_invoice_number: null, access_key: null } });
-  assert.equal((await rejected.actions.invoiceOrderAction(id, true)).billingOutcome, 'confirmed');
+  assert.equal((await rejected.actions.invoiceOrderAction(id, true)).billingOutcome, 'submitted');
+});
+
+test('sem fila persistida antes da emissão, não chama FaturarPedidoVenda', async()=>{
+  const h=omie({queuePersistError:true});
+  assert.equal((await billing.invoiceExistingOrder(h.args)).outcome,'rejected');
+  assert.equal(h.calls.some(call=>call.method==='FaturarPedidoVenda'),false);
+  assert.deepEqual(h.states,['billing_submitting','billing_rejected']);
+});
+
+test('lote envia o próximo pedido depois do aceite sem esperar ou consultar novamente a NF-e anterior',async()=>{
+  const runner=loadModule('../src/lib/omie/billing-batch.ts');
+  const trace=[],results=[];
+  await runner.runBillingBatch(['first','next'],{
+    onStart(){},onResult(id,result){results.push([id,result.billingOutcome]);},
+    async invoice(id){
+      const h=omie({delayed:true});const original=h.args.request;
+      h.args.request=async(endpoint,method,params)=>{trace.push(id+':'+method);return original(endpoint,method,params);};
+      const result=await billing.invoiceExistingOrder(h.args);
+      return{status:'success',message:result.message,billingOutcome:result.outcome};
+    },
+  });
+  assert.deepEqual(results,[['first','submitted'],['next','submitted']]);
+  assert.ok(trace.indexOf('first:FaturarPedidoVenda')<trace.indexOf('next:ConsultarPedido'));
+  for(const id of ['first','next'])assert.equal(trace.filter(method=>method===id+':StatusPedido').length,1);
 });
 
 test('bloqueia emissão com vencimento incorreto, boleto ou contas a receber ativos', async () => {

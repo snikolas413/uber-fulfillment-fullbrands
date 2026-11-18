@@ -25,6 +25,8 @@ Na Expedição, uma falha de etiqueta fica registrada no pedido e no histórico.
 
 Inclusão de pedidos, seleção de frete e faturamento seguem a mesma regra: o primeiro erro encerra as etapas daquele pedido, salva o motivo na linha e no histórico e deixa o lote avançar. Recusas de negócio e consultas redundantes não pausam outros pedidos. Bloqueio de consumo, autenticação e indisponibilidade geral respeitam a pausa da API antes de iniciar o próximo pedido, sem reenviar a operação que falhou. Operações concorrentes aguardam a reserva compartilhada, em vez de transformar uma ocupação temporária em erro do pedido.
 
+No faturamento, o aceite do Omie libera o envio do próximo pedido. Uma fila persistente separada consulta a autorização da NF-e, sem emitir novamente. A fila respeita 61 segundos entre conferências, usa reserva exclusiva por consulta e para aquele pedido em caso de erro ou após 20 consultas ainda pendentes. A tela distingue aceite, confirmação e falha. As conferências rodam enquanto Faturamento estiver aberto e retomam as pendências salvas ao reabrir a página; a emissão do lote continua exigindo seleção e confirmação explícitas.
+
 ## Executar localmente
 ```bash
 cp .env.example .env.local
