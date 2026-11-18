@@ -137,3 +137,26 @@ test('confirmação em background adia leitura recente sem bloquear a fila de no
   assert.equal(await h.control('/pedido/','ValidarPedidoVenda',{id:2},async()=>'next'),'next');
   assert.equal(h.time()-at,300);
 });
+
+test('janela de um ID libera outros pedidos e revalida concorrência da mesma chave', async () => {
+  let time = 1000, leased = false;
+  const sleepers = [], calls = [];
+  const control = createOmieRequestControl({ now: () => time,
+    wait: ms => new Promise(resolve => sleepers.push({ ms, resolve })),
+    async acquire() { assert.equal(leased, false); leased = true; return { lease: 'one', waitMs: 0 }; },
+    async finish() { leased = false; },
+  });
+  const run = id => control('/pedido/', 'ConsultarPedido', { id }, async () => { calls.push([id, time]); return id; });
+  await run(1);
+  const first = run(1), second = run(1);
+  await run(2);
+  assert.deepEqual(calls, [[1, 1000], [2, 1000]]);
+  assert.equal(sleepers.length, 2); assert.equal(leased, false);
+  time += 61000; sleepers.splice(0).forEach(s => s.resolve());
+  await first;
+  await run(3);
+  assert.equal(sleepers.length, 1);
+  assert.deepEqual(calls, [[1, 1000], [2, 1000], [1, 62000], [3, 62000]]);
+  time += 61000; sleepers.shift().resolve(); await second;
+  assert.deepEqual(calls.at(-1), [1, 123000]);
+});

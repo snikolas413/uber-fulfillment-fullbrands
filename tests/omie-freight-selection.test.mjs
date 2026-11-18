@@ -29,6 +29,7 @@ function omieStub(options = {}) {
   let carrierAssigned = false;
   const request = async (endpoint, method, params) => {
     calls.push({ endpoint, method, params });
+    await options.beforeRequest?.(method);
     if (method === 'ConsultarPedido') {
       reads++;
       if (options.afterError && reads === 3) throw new Error('Falha de consulta');
@@ -294,15 +295,15 @@ test('pedido existente sem transportadora recebe Correios e depois seleciona Min
   assert.ok(calls.findIndex(call => call.method === 'AlterarPedidoVenda') < calls.findIndex(call => call.method === 'CotarFrete'));
 });
 
-test('cadastro Correios ausente, inativo ou ambíguo bloqueia a criação antes de reservar', async () => {
+test('cadastro Correios ausente, inativo ou ambíguo bloqueia a criação e libera a reserva', async () => {
   const carrier = { codigo_cliente_omie: 123, razao_social: 'EMPRESA BRASILEIRA DE CORREIOS E TELEGRAFOS', inativo: 'N' };
   for (const carriers of [[], [{ ...carrier, inativo: 'S' }], [carrier, { ...carrier, codigo_cliente_omie: 456 }]]) {
     const { actions, calls, writes } = actionsStub({ carriers });
     assert.equal((await actions.sendOrderToOmieAction(id)).status, 'error');
     assert.ok(!calls.some(call => call.method === 'IncluirPedido'));
-    assert.equal(writes.length, 1);
-    assert.deepEqual(Object.keys(writes[0]), ['omie_last_error']);
-    assert.match(writes[0].omie_last_error, /^Envio: /);
+    assert.ok(!writes.some(write => write.status === 'order_pending'));
+    assert.match(writes.find(write => write.omie_last_error).omie_last_error, /^Envio: /);
+    assert.equal(writes.at(-1).omie_send_started_at, null);
   }
 });
 
@@ -378,4 +379,17 @@ test('reconhece o código oficial Mini Envios quando descrição não é retorna
   const pac = omieStub({ quotes: [{ ...mini, cDescricaoServico: '', cTipoServico: '03298' }] });
   await assert.rejects(freight.selectMiniEnviosFreight(pac.request, 555, integrationCode));
   assert.ok(!pac.calls.some(call => call.method === 'SelecionarFrete'));
+});
+
+test('duas sessões no mesmo pedido reservam antes da validação externa e incluem uma vez', async () => {
+  let release, entered;
+  const gate = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { entered = resolve; });
+  const stub = actionsStub({ async beforeRequest(method) { if (method === 'ListarClientes') { entered(); await gate; } } });
+  const first = stub.actions.sendOrderToOmieAction(id);
+  await started;
+  assert.equal((await stub.actions.sendOrderToOmieAction(id)).status, 'warning');
+  assert.equal(stub.calls.length, 1);
+  release(); assert.equal((await first).status, 'success');
+  assert.equal(stub.calls.filter(call => call.method === 'IncluirPedido').length, 1);
 });

@@ -10,7 +10,7 @@ import { OrderBatchModal } from "./order-batch-modal";
 import { OrderReviewEditor } from "./order-review-editor";
 import { OmieActionButton } from "@/components/omie-action-button";
 import { ShippingEditor } from "@/app/expedicao/shipping-editor";
-import { sendOrderToOmieAction } from "./omie-actions";
+import { sendPreparedOrder } from "@/lib/omie/order-send-request";
 import { canSendPreparedOrder, runOrderSendBatch, type SendResult } from "@/lib/omie/order-send-batch";
 import { ORDER_PAGE_SIZE, type OrderListState, type OrderView } from "@/lib/order-list";
 
@@ -109,7 +109,7 @@ export function OrderManagement({
   const sendingRef = useRef(false);
   const stopRef = useRef(false);
   const [stopping, setStopping] = useState(false);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeIds, setActiveIds] = useState<string[]>([]);
   const [batchTotal, setBatchTotal] = useState(0);
   const [batchDone, setBatchDone] = useState(0);
   const [batchNotice, setBatchNotice] = useState("");
@@ -141,10 +141,11 @@ export function OrderManagement({
     setBatchNotice("");
     try {
       await runOrderSendBatch(ids, {
-        send: sendOrderToOmieAction, shouldStop: () => stopRef.current,
-        onStart(id) { setActiveId(id); setBatchNotice(""); },
-        onWait(at) { setActiveId(null); setBatchNotice("Aguardando liberação da API até " + new Date(at).toLocaleTimeString("pt-BR") + ". O lote seguirá para o próximo pedido."); },
+        send: sendPreparedOrder, shouldStop: () => stopRef.current,
+        onStart(id) { setActiveIds(current => [...current, id]); setBatchNotice(""); },
+        onWait(at) { setBatchNotice("Aguardando liberação da API até " + new Date(at).toLocaleTimeString("pt-BR") + ". O lote seguirá para os próximos pedidos."); },
         onResult(id, result) {
+          setActiveIds(current => current.filter(value => value !== id));
           if (result.status !== "success") setBatchNotice("O aviso foi registrado no pedido. O lote continua para o próximo, sem repetir o pedido com falha.");
           setSendResults(current => ({ ...current, [id]: result }));
           setSelected(current => current.filter(value => value !== id));
@@ -152,7 +153,7 @@ export function OrderManagement({
         },
       });
     } finally {
-      sendingRef.current = false; setSending(false); setStopping(false); setActiveId(null);
+      sendingRef.current = false; setSending(false); setStopping(false); setActiveIds([]);
       router.refresh();
     }
   }
@@ -199,9 +200,9 @@ export function OrderManagement({
         {canWrite && <div className="order-send-toolbar">
           <span>{selectedOrders.length} pedido(s) selecionado(s) · Até 100 por lote</span>
           <button type="button" className="primary-button" disabled={sending || !selectedOrders.length} onClick={sendSelected}>{sending ? <LoaderCircle size={16} className="auth-spinner" /> : <Send size={16} />} {sending ? "Enviando ao Omie..." : "Enviar selecionados ao Omie"}</button>
-          {sending && <button type="button" className="secondary-button" disabled={stopping} onClick={() => { stopRef.current = true; setStopping(true); }}>{stopping ? "Concluindo pedido atual..." : "Parar após o pedido atual"}</button>}
+          {sending && <button type="button" className="secondary-button" disabled={stopping} onClick={() => { stopRef.current = true; setStopping(true); }}>{stopping ? "Concluindo pedidos em andamento..." : "Parar novos envios"}</button>}
         </div>}
-        {batchTotal > 0 && <div role="status" aria-live="polite" className="order-send-progress">{sending ? "Processando" : "Lote encerrado"}: {batchDone} de {batchTotal} pedido(s). {sending ? "Mantenha esta página aberta." : batchNotice || "Confira o resultado em cada linha."}</div>}
+        {batchTotal > 0 && <div role="status" aria-live="polite" className="order-send-progress">{sending ? "Processando" : "Lote encerrado"}: {batchDone} de {batchTotal} pedido(s). {sending && "Até 2 pedidos em andamento. Mantenha esta página aberta."} {batchNotice || (!sending && "Confira o resultado em cada linha.")}</div>}
         {loadError && <div className="recipient-alert recipient-alert-error">{loadError}</div>}
         {visibleDrafts.length ? (
           <div className="orders-table-wrap">
@@ -223,7 +224,7 @@ export function OrderManagement({
                       <td><span className="orders-date"><Clock3 size={12} />{formatDate(draft.created_at)}</span></td>
                       <td>
                         {canWrite && !draft.omie_order_id && ["order_pending", "error"].includes(draft.status) && <OrderReviewEditor fulfillmentId={draft.id} disabled={sending} />}
-                        {activeId === draft.id && <small role="status">Criando pedido e selecionando Mini Envios...</small>}
+                        {activeIds.includes(draft.id) && <small role="status">Criando pedido e selecionando Mini Envios...</small>}
                         {sendResults[draft.id] && <small role="status" className={`omie-action-result omie-action-result-${sendResults[draft.id].status}`}>{sendResults[draft.id].message}</small>}
                         {canWrite && !draft.omie_order_id && !sendResults[draft.id] && ["ready", "order_pending", "error"].includes(draft.status) && <OmieActionButton disabled={sending} fulfillmentId={draft.id} kind="send" size="small" />}
                         {canWrite && (["order_created", "billing_pending", "billed"].includes(draft.status) || sendResults[draft.id]) && <OmieActionButton disabled={sending} fulfillmentId={draft.id} kind="sync-order" size="small" />}

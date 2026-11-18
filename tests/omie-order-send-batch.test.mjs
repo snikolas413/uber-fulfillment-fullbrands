@@ -20,13 +20,13 @@ function load(path, modules = {}) {
 }
 const batch = load('../src/lib/omie/order-send-batch.ts');
 
-test('envio em lote é sequencial, só usa selecionados e nunca autoriza reinclusão', async () => {
+test('envio em lote intercala dois pedidos, só usa selecionados e nunca autoriza reinclusão', async () => {
   const calls = [], results = [];
-  let active = false;
+  let active = 0, peak = 0;
   await batch.runOrderSendBatch(['one', 'lost', 'one', 'last'], {
     async send(id, confirmRetry) {
-      assert.equal(active, false); assert.equal(confirmRetry, false); active = true;
-      await Promise.resolve(); active = false; calls.push(id);
+      active++; peak = Math.max(peak, active); assert.ok(active <= 2); assert.equal(confirmRetry, false);
+      await Promise.resolve(); active--; calls.push(id);
       if (id === 'lost') throw new Error('Timeout');
       return { status: 'success', message: 'Pedido criado e Mini Envios selecionado' };
     }, onStart() {}, onResult(id, result) { results.push([id, result]); }, shouldStop: () => false,
@@ -35,14 +35,15 @@ test('envio em lote é sequencial, só usa selecionados e nunca autoriza reinclu
   assert.equal(results[1][1].status, 'warning');
   assert.match(results[1][1].message, /Atualizar Omie/);
   assert.equal(results.length, 3);
+  assert.equal(peak, 2);
 });
 
-test('interrompe somente depois do pedido atual e bloqueia lotes fora do limite', async () => {
+test('interrompe novos envios e conclui os dois pedidos ativos; bloqueia lotes fora do limite', async () => {
   let stopped = false;
   const calls = [];
   const options = { async send(id) { calls.push(id); return { status: 'warning', message: 'Revisar frete' }; }, onStart() {}, onResult() { stopped = true; }, shouldStop: () => stopped };
-  await batch.runOrderSendBatch(['one', 'two'], options);
-  assert.deepEqual(calls, ['one']);
+  await batch.runOrderSendBatch(['one', 'two', 'three'], options);
+  assert.deepEqual(calls, ['one', 'two']);
   for (const ids of [[], Array.from({ length: 101 }, (_, i) => String(i))]) await assert.rejects(batch.runOrderSendBatch(ids, options));
 });
 
@@ -61,11 +62,11 @@ test('erro ou pendência fica no pedido e o lote continua, sem nova tentativa', 
 test('bloqueio geral aguarda antes do próximo envio sem repetir o pedido recusado', async () => {
   let now = 1000;
   const calls = [];
-  await batch.runOrderSendBatch(['first', 'next'], {
+  await batch.runOrderSendBatch(['first', 'next', 'third'], {
     now: () => now, wait: async ms => { now += ms; }, shouldStop: () => false, onStart() {}, onResult() {},
     async send(id) { calls.push([id, now]); return id === 'first' ? { status: 'error', message: 'Limite de consumo', retryAt: 62000 } : { status: 'success', message: 'Criado' }; },
   });
-  assert.deepEqual(calls, [['first', 1000], ['next', 62000]]);
+  assert.deepEqual(calls, [['first', 1000], ['next', 1000], ['third', 62000]]);
 });
 
 test('seleção só admite preparados sem ID Omie; tentativas pendentes e pedidos avançados ficam fora do lote', () => {
@@ -84,7 +85,7 @@ test('lista mostra seleção e botão de lote só para escrita; abrir página n�
     './order-review-editor': { OrderReviewEditor: ({ fulfillmentId }) => React.createElement('button', { 'data-review': fulfillmentId }, 'Editar pedido') },
     '@/components/omie-action-button': { OmieActionButton: () => null },
     '@/app/expedicao/shipping-editor': { ShippingEditor: () => null },
-    './omie-actions': { sendOrderToOmieAction() { assert.fail('Renderização não pode enviar'); } },
+    '@/lib/omie/order-send-request': { sendPreparedOrder() { assert.fail('Renderização não pode enviar'); } },
     '@/lib/omie/order-send-batch': batch,
     '@/lib/order-list': { ORDER_PAGE_SIZE: 100 },
   });
@@ -106,4 +107,16 @@ test('lista mostra seleção e botão de lote só para escrita; abrir página n�
   assert.ok(!readonly.includes('type="checkbox"'));
   assert.ok(!readonly.includes('Enviar selecionados ao Omie'));
   assert.ok(!readonly.includes('Editar pedido'));
+});
+
+test('vaga liberada avança para o terceiro enquanto o primeiro ainda aguarda', async () => {
+  let release, third;
+  const gate = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { third = resolve; });
+  const calls = [];
+  const running = batch.runOrderSendBatch(['slow', 'fast', 'third'], {
+    async send(id) { calls.push(id); if (id === 'slow') await gate; if (id === 'third') third(); return { status: 'success', message: 'ok' }; },
+    onStart() {}, onResult() {}, shouldStop: () => false,
+  });
+  await started; assert.deepEqual(calls, ['slow', 'fast', 'third']); release(); await running;
 });

@@ -19,15 +19,22 @@ export async function runOrderSendBatch(ids: string[], options: {
   const now = options.now ?? Date.now;
   const wait = options.wait ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
   let retryAt = 0;
-  for (const id of unique) {
-    if (retryAt > now()) options.onWait?.(retryAt);
-    while (retryAt > now() && !options.shouldStop()) await wait(Math.min(1000, retryAt - now()));
-    if (options.shouldStop()) break;
-    options.onStart(id);
-    let result: SendResult;
-    try { result = await options.send(id, false); }
-    catch { result = { status: "warning", message: "Resposta não confirmada. Use Atualizar Omie para conferir este pedido antes de qualquer nova tentativa." }; }
-    options.onResult(id, result);
-    retryAt = typeof result.retryAt === "number" && Number.isFinite(result.retryAt) ? result.retryAt : 0;
-  }
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < unique.length) {
+      if (retryAt > now()) options.onWait?.(retryAt);
+      while (retryAt > now() && !options.shouldStop()) await wait(Math.min(1000, retryAt - now()));
+      if (options.shouldStop() || cursor >= unique.length) return;
+      const id = unique[cursor++];
+      options.onStart(id);
+      let result: SendResult;
+      try { result = await options.send(id, false); }
+      catch { result = { status: "warning", message: "Resposta não confirmada. Use Atualizar Omie para conferir este pedido antes de qualquer nova tentativa." }; }
+      if (typeof result.retryAt === "number" && Number.isFinite(result.retryAt)) retryAt = Math.max(retryAt, result.retryAt);
+      options.onResult(id, result);
+    }
+  };
+  // At most two distinct orders in progress; each one is attempted once.
+  // The API controller still serializes outbound calls and keeps per-ID windows.
+  await Promise.all([worker(), worker()]);
 }

@@ -105,6 +105,10 @@ Novos pedidos usam condição personalizada `999`, uma parcela de 100% com venci
 
 Conferência real no Omie: quando todos os itens usam `nao_gerar_financeiro = S`, o ERP remove as parcelas e pode omitir o padrão `nao_gerar_boleto` nas consultas. Sem parcelas, não há vencimento ou boleto gerado. A conferência aceita esse retorno; se houver parcelas, exige 31/12/2026 e não gerar boleto em cada uma.
 
-## Melhorias reservadas para a próxima etapa (18/11/2026)
+## Envio intercalado de dois pedidos (18/11/2026)
 
-Proposta de velocidade do envio, solicitada para guardar e implementar depois: intercalar as etapas de pedidos distintos durante as janelas de espera do Omie; começar com dois pedidos em andamento, respeitando os limites específicos de cada método e a trava individual de cada pedido. Pré-validar o lote, aprimorar o cache dos cadastros estáveis e avaliar execução em segundo plano. Medir um piloto de 10–20 pedidos antes de ampliar. Não remover conferências fiscais/de vínculo nem repetir inclusões, emissões ou etiquetas com resultado incerto. Proposta registrada; implementação e publicação ainda não autorizadas.
+O lote de envio mantém até dois pedidos distintos em andamento. Quando um termina, sua vaga recebe o próximo selecionado. A espera de 61 segundos de uma consulta libera o agendamento para outro pedido; a janela é conferida novamente antes da chamada. O controle global continua permitindo apenas uma chamada externa por vez, com espaçamento e pausas persistidas. Falhas não repetem a operação: ficam no pedido e liberam a vaga, respeitando eventual bloqueio geral da API.
+
+A reserva individual é adquirida antes das consultas fiscais e de transportadora. Somente após essas validações o pedido passa a `order_pending`, antes da inclusão. A rota autenticada de envio reutiliza as validações da ação existente e nunca autoriza reinclusão. Inclusões com resultado incerto exigem reconciliação. O botão de parada impede novos envios e deixa os dois pedidos ativos concluírem. Mantenha a página aberta durante o lote.
+
+Continuam como propostas futuras: pré-validar o lote, ampliar o cache dos cadastros estáveis e avaliar execução em segundo plano. Medir um piloto de 10–20 pedidos antes de ampliar a concorrência; o ganho real depende dos tempos do Omie. Conferências fiscais/de vínculo e proteções contra duplicidade permanecem obrigatórias.

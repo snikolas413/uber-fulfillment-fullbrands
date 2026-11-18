@@ -332,6 +332,20 @@ export async function sendOrderToOmieAction(id: string, confirmRetry = false): P
       return { status: "error", message: "O status local não permite enviar este pedido ao Omie." };
     }
 
+    // Reserve this order before any creation preflight. Two operators must not
+    // run duplicate fiscal/carrier checks while one owns the inclusion pipeline.
+    const startedAt = new Date().toISOString();
+    const staleBefore = new Date(Date.now() - 15 * 60_000).toISOString();
+    const { data: lock, error: lockError } = await supabase.from("fulfillments").update({
+      omie_send_started_at: startedAt, updated_at: startedAt,
+    }).eq("id", row.id).eq("status", row.status).eq("updated_at", row.updated_at).is("omie_order_id", null)
+      .or(`omie_send_started_at.is.null,omie_send_started_at.lt.${staleBefore}`).select("id").maybeSingle();
+    if (lockError || !lock) return { status: "warning", message: "O pedido mudou ou outro envio está em andamento. Atualize a tela e confira os dados antes de continuar." };
+    releaseLock = async () => {
+      const { error } = await supabase.from("fulfillments").update({ omie_send_started_at: null })
+        .eq("id", id).eq("omie_send_started_at", startedAt);
+      if (error) console.error("Não foi possível liberar a reserva de envio do pedido.");
+    };
     const carrierId = await resolveCorreiosCarrier(callOmie);
     const { address, item } = validateOrder(row);
     const scenarioId = Number(row.omie_tax_scenario_id);
@@ -342,18 +356,11 @@ export async function sendOrderToOmieAction(id: string, confirmRetry = false): P
     }
     const otherTaxes = await simulateItemTaxes(callOmie, { scenarioId, customerId, productId: item.omie_product_id,
       quantity: Number(item.quantity), unitPrice: Number(item.unit_price), deliveryState: address.state });
-    const startedAt = new Date().toISOString();
-    const staleBefore = new Date(Date.now() - 15 * 60_000).toISOString();
-    const { data: lock, error: lockError } = await supabase.from("fulfillments").update({
-      status: "order_pending", omie_last_error: null, omie_send_started_at: startedAt, updated_at: startedAt,
-    }).eq("id", row.id).eq("status", row.status).eq("updated_at", row.updated_at).is("omie_order_id", null)
-      .or(`omie_send_started_at.is.null,omie_send_started_at.lt.${staleBefore}`).select("id").maybeSingle();
-    if (lockError || !lock) return { status: "warning", message: "O pedido mudou ou outro envio está em andamento. Atualize a tela e confira os dados antes de continuar." };
-    releaseLock = async () => {
-      const { error } = await supabase.from("fulfillments").update({ omie_send_started_at: null })
-        .eq("id", id).eq("omie_send_started_at", startedAt);
-      if (error) console.error("Não foi possível liberar a reserva de envio do pedido.");
-    };
+    // A preflight error leaves the draft prepared. Pending/uncertain inclusion
+    // starts only after successful validation and while this exact claim is held.
+    const { data: pending, error: pendingError } = await supabase.from("fulfillments").update({ status: "order_pending", omie_last_error: null })
+      .eq("id", id).eq("omie_send_started_at", startedAt).eq("status", row.status).is("omie_order_id", null).select("id").maybeSingle();
+    if (pendingError || !pending) return { status: "warning", message: "A reserva do pedido mudou. Atualize a tela antes de continuar." };
     row = { ...row, status: "order_pending" };
 
     try {

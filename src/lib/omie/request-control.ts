@@ -49,49 +49,58 @@ export function createOmieRequestControl({ acquire, finish, now = Date.now, wait
 
   return function controlled<T>(endpoint: string, method: string, params: Record<string, unknown>, request: () => Promise<T>, options?: { background?: boolean }): Promise<T> {
     const key = endpoint + ":" + method + ":" + stable(params);
-    const task = queue.then(async () => {
-      if (pausedUntil > now()) throw new OmieRequestPausedError(pausedUntil);
-      const cached = cache.get(key);
-      if (cachedReads.has(method) && cached && cached.until > now()) return structuredClone(cached.value) as T;
-      cache.delete(key);
-      // Fresh checks after writes must never use a stale order or invoice snapshot.
-      // Wait BEFORE making the new call, rather than causing REDUNDANT and retrying it.
-      const readWait = (reads.get(key) ?? 0) - now();
-      if (readWait > 0 && options?.background) throw new OmieRequestPausedError(now() + readWait, "Aguardando a janela desta consulta.");
-      if (readWait > 0) await wait(readWait);
-      const reservation = await acquire({ waitForBusy: !options?.background });
-      if (reservation.waitMs > 0) await wait(reservation.waitMs);
-      let result: T;
-      try {
-        result = await request();
-      } catch (error) {
-        const seconds = pauseSeconds(error);
-        if (seconds > 0) { pausedUntil = now() + seconds * 1000; cache.clear(); }
-        // A failed request is never replayed. A redundant read only delays the
-        // same request key; another order can proceed immediately.
-        const message = error instanceof Error ? error.message : "";
-        if (/redundant|redundante/i.test(message + " " + (error as { code?: string } | null)?.code)) {
-          const seconds = Number(/aguarde\s+(\d+)\s+segundos?/i.exec(message)?.[1] ?? 60);
-          reads.set(key, now() + Math.max(61, seconds + 1) * 1000); trim(reads);
-        }
-        try { await finish(reservation.lease, seconds); }
-        catch { pausedUntil = Math.max(pausedUntil, now() + 120_000); throw new OmieRequestPausedError(pausedUntil, message, true); }
-        if (seconds > 0) throw new OmieRequestPausedError(pausedUntil, message || "Falha na comunicação com o Omie.", true);
-        throw error;
+    type Turn = { ready: true; value: T } | { ready: false; until: number };
+    return (async () => {
+      while (true) {
+        const task = queue.then(async (): Promise<Turn> => {
+          if (pausedUntil > now()) throw new OmieRequestPausedError(pausedUntil);
+          const cached = cache.get(key);
+          if (cachedReads.has(method) && cached && cached.until > now()) return { ready: true, value: structuredClone(cached.value) as T };
+          cache.delete(key);
+          // Fresh checks after writes must never use a stale order or invoice snapshot.
+          // Wait BEFORE making the new call, rather than causing REDUNDANT and retrying it.
+          const readWait = (reads.get(key) ?? 0) - now();
+          if (readWait > 0 && options?.background) throw new OmieRequestPausedError(now() + readWait, "Aguardando a janela desta consulta.");
+          // Release the scheduling turn while this ID cools down. Another order
+          // may use the API; this call rechecks the window before acquiring a lease.
+          if (readWait > 0) return { ready: false, until: now() + readWait };
+          const reservation = await acquire({ waitForBusy: !options?.background });
+          if (reservation.waitMs > 0) await wait(reservation.waitMs);
+          let result: T;
+          try {
+            result = await request();
+          } catch (error) {
+            const seconds = pauseSeconds(error);
+            if (seconds > 0) { pausedUntil = now() + seconds * 1000; cache.clear(); }
+            // A failed request is never replayed. A redundant read only delays the
+            // same request key; another order can proceed immediately.
+            const message = error instanceof Error ? error.message : "";
+            if (/redundant|redundante/i.test(message + " " + (error as { code?: string } | null)?.code)) {
+              const seconds = Number(/aguarde\s+(\d+)\s+segundos?/i.exec(message)?.[1] ?? 60);
+              reads.set(key, now() + Math.max(61, seconds + 1) * 1000); trim(reads);
+            }
+            try { await finish(reservation.lease, seconds); }
+            catch { pausedUntil = Math.max(pausedUntil, now() + 120_000); throw new OmieRequestPausedError(pausedUntil, message, true); }
+            if (seconds > 0) throw new OmieRequestPausedError(pausedUntil, message || "Falha na comunicação com o Omie.", true);
+            throw error;
+          }
+          try { await finish(reservation.lease, 0); }
+          catch {
+            pausedUntil = now() + 120_000;
+            throw new OmieRequestPausedError(pausedUntil, "A resposta chegou, mas não foi possível liberar a reserva da integração. Confira o pedido antes de repetir.", true);
+          }
+          if (cachedReads.has(method)) {
+            cache.set(key, { until: now() + READ_WINDOW_MS, value: structuredClone(result) });
+            trim(cache);
+          }
+          if (freshReads.has(method)) { reads.set(key, now() + READ_WINDOW_MS); trim(reads); }
+          return { ready: true, value: result };
+        });
+        queue = task.then(() => undefined, () => undefined);
+        const turn = await task;
+        if (turn.ready) return turn.value;
+        await wait(Math.max(0, turn.until - now()));
       }
-      try { await finish(reservation.lease, 0); }
-      catch {
-        pausedUntil = now() + 120_000;
-        throw new OmieRequestPausedError(pausedUntil, "A resposta chegou, mas não foi possível liberar a reserva da integração. Confira o pedido antes de repetir.", true);
-      }
-      if (cachedReads.has(method)) {
-        cache.set(key, { until: now() + READ_WINDOW_MS, value: structuredClone(result) });
-        trim(cache);
-      }
-      if (freshReads.has(method)) { reads.set(key, now() + READ_WINDOW_MS); trim(reads); }
-      return result;
-    });
-    queue = task.then(() => undefined, () => undefined);
-    return task;
+    })();
   };
 }
