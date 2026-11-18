@@ -16,19 +16,24 @@ export async function runShippingLabelBatch(ids: string[], options: {
   const now = options.now ?? Date.now;
   const wait = options.wait ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
   let retryAt = 0;
-  for (const id of unique) {
-    // An error belongs to the previous order. Wait for API protection to expire
-    // before starting the NEXT order; never replay the failed generation.
-    if (retryAt > now()) options.onWait?.(retryAt);
-    while (retryAt > now() && !options.shouldStop()) await wait(Math.min(1000, retryAt - now()));
-    if (options.shouldStop()) break;
-    options.onStart(id);
-    let result: BatchLabelResult;
-    try { result = await options.generate(id, true); }
-    catch { result = { status: "error", message: "Resposta não confirmada. Confira a etiqueta deste pedido antes de tentar gerar novamente." }; }
-    if (result.status === "success" && result.url) ready.push(id);
-    options.onResult(id, result);
-    retryAt = result.status === "error" && typeof result.retryAt === "number" && Number.isFinite(result.retryAt) ? result.retryAt : 0;
-  }
-  return ready;
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < unique.length) {
+      if (retryAt > now()) options.onWait?.(retryAt);
+      while (retryAt > now() && !options.shouldStop()) await wait(Math.min(1000, retryAt - now()));
+      if (options.shouldStop() || cursor >= unique.length) return;
+      const id = unique[cursor++];
+      options.onStart(id);
+      let result: BatchLabelResult;
+      try { result = await options.generate(id, true); }
+      catch { result = { status: "error", message: "Resposta não confirmada. Confira a etiqueta deste pedido antes de tentar gerar novamente." }; }
+      if (result.status === "success" && result.url) ready.push(id);
+      if (typeof result.retryAt === "number" && Number.isFinite(result.retryAt)) retryAt = Math.max(retryAt, result.retryAt);
+      options.onResult(id, result);
+    }
+  };
+  // Two distinct pipelines; outbound Omie calls remain globally serialized.
+  // Never repeat a generation, and preserve selection order in the final PDF.
+  await Promise.all([worker(), worker()]);
+  return unique.filter(id => ready.includes(id));
 }

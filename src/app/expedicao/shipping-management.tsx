@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { AlertTriangle, LoaderCircle, MapPin, PackageCheck, Printer, Search, ShieldCheck, Truck } from "lucide-react";
 import { OmieActionButton } from "@/components/omie-action-button";
 import { LabelButton } from "./label-button";
-import { generateShippingLabelAction, type LabelResult } from "./label-actions";
+import type { LabelResult } from "./label-actions";
+import { prepareShippingLabel } from "@/lib/omie/shipping-label-request";
 import { canPrepareShippingLabel, runShippingLabelBatch } from "@/lib/omie/shipping-label-batch";
 
 type Shipment = { tracking_code: string | null; tracking_url: string | null; estimated_delivery_date: string | null; package_count: number | null; label_storage_path: string | null; label_generation_state: string; label_last_error?: string | null; label_error_at?: string | null; freight_amount: number | null };
@@ -24,7 +25,7 @@ export function ShippingManagement({ rows, canGenerate, loadError }: { rows: Shi
   const [assembling, setAssembling] = useState(false);
   const runningRef = useRef(false); const stopRef = useRef(false);
   const [stopping, setStopping] = useState(false);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeIds, setActiveIds] = useState<string[]>([]);
   const [completed, setCompleted] = useState(0); const [total, setTotal] = useState(0);
   const [printable, setPrintable] = useState<string[]>([]);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -61,18 +62,18 @@ export function ShippingManagement({ rows, canGenerate, loadError }: { rows: Shi
       const successIds = await runShippingLabelBatch(ids, {
         async generate(id) {
           const row = chosen.find(row => row.id === id)!;
-          return ready(row) ? { status: "success", message: "Etiqueta salva reutilizada, sem nova geração no Omie.", url: `/api/expedicao/${id}/etiqueta` } : generateShippingLabelAction(id, true);
+          return ready(row) ? { status: "success", message: "Etiqueta salva reutilizada, sem nova geração no Omie.", url: `/api/expedicao/${id}/etiqueta` } : prepareShippingLabel(id, true);
         },
         shouldStop: () => stopRef.current,
-        onStart(id) { setActiveId(id); setMessage(""); },
-        onWait(retryAt) { setActiveId(null); setMessage("Aguardando a liberação do Omie até " + new Date(retryAt).toLocaleTimeString("pt-BR") + ". O lote continuará com o próximo pedido."); },
-        onResult(id, result) { setResults(current => ({ ...current, [id]: result })); setCompleted(current => current + 1); setSelected(current => current.filter(value => value !== id)); },
+        onStart(id) { setActiveIds(current => [...current, id]); setMessage(""); },
+        onWait(retryAt) { setMessage("Aguardando a liberação do Omie até " + new Date(retryAt).toLocaleTimeString("pt-BR") + ". O lote continuará com o próximo pedido."); },
+        onResult(id, result) { setActiveIds(current => current.filter(value => value !== id)); setResults(current => ({ ...current, [id]: result })); setCompleted(current => current + 1); setSelected(current => current.filter(value => value !== id)); },
       });
-      setActiveId(null); setPrintable(successIds);
+      setActiveIds([]); setPrintable(successIds);
       setMessage(successIds.length ? `O PDF reúne ${successIds.length} de ${ids.length} pedido(s) selecionado(s). Pedidos com erro ou não processados não estão incluídos.` : "Nenhuma etiqueta confirmada para reunir. Confira os resultados individuais.");
       if (successIds.length) await assemble(successIds);
     } catch (error) { setMessage((error instanceof Error ? error.message : "Não foi possível montar o PDF do lote.") + " As etiquetas individuais concluídas continuam salvas."); }
-    finally { runningRef.current = false; setRunning(false); setActiveId(null); router.refresh(); }
+    finally { runningRef.current = false; setRunning(false); setActiveIds([]); router.refresh(); }
   }
   async function retryPdf() {
     if (runningRef.current || !printable.length) return;
@@ -92,8 +93,8 @@ export function ShippingManagement({ rows, canGenerate, loadError }: { rows: Shi
     </section>
     <section className="panel orders-panel">
       <div className="recipient-toolbar"><div><span className="section-kicker">FILA DE EXPEDIÇÃO</span><h2>Envios e rastreamento</h2></div><label className="recipient-search"><Search size={16} /><input aria-label="Buscar envios" placeholder="Buscar por destinatário, NF-e ou rastreio" value={search} onChange={event => setSearch(event.target.value)} /></label></div>
-      {canGenerate && <div className="order-send-toolbar"><span>{chosen.length} selecionado(s) · Até 100 pedidos por lote</span><button type="button" className="primary-button" disabled={running || !chosen.length} onClick={run}>{running ? <LoaderCircle size={16} className="auth-spinner" /> : <Printer size={16} />}{assembling ? "Montando PDF..." : running ? "Preparando etiquetas..." : "Preparar etiquetas selecionadas"}</button>{running && !assembling && <button type="button" className="secondary-button" disabled={stopping} onClick={() => { stopRef.current = true; setStopping(true); }}>{stopping ? "Concluindo pedido atual..." : "Parar após o pedido atual"}</button>}</div>}
-      {total > 0 && <div className="order-send-progress" role="status" aria-live="polite">{running ? "Processando" : "Lote encerrado"}: {completed} de {total} pedido(s). {running && "Mantenha esta página aberta."}{message && <p>{message}</p>}{pdfUrl && <a className="secondary-button" href={pdfUrl} target="_blank" rel="noreferrer">Abrir PDF do lote ({printable.length} pedidos)</a>}{!pdfUrl && printable.length > 0 && !running && <button type="button" className="secondary-button" onClick={retryPdf}>Tentar montar o PDF novamente</button>}</div>}
+      {canGenerate && <div className="order-send-toolbar"><span>{chosen.length} selecionado(s) · Até 100 pedidos por lote</span><button type="button" className="primary-button" disabled={running || !chosen.length} onClick={run}>{running ? <LoaderCircle size={16} className="auth-spinner" /> : <Printer size={16} />}{assembling ? "Montando PDF..." : running ? "Preparando etiquetas..." : "Preparar etiquetas selecionadas"}</button>{running && !assembling && <button type="button" className="secondary-button" disabled={stopping} onClick={() => { stopRef.current = true; setStopping(true); }}>{stopping ? "Concluindo pedidos em andamento..." : "Parar novos envios"}</button>}</div>}
+      {total > 0 && <div className="order-send-progress" role="status" aria-live="polite">{running ? "Processando" : "Lote encerrado"}: {completed} de {total} pedido(s). {running && "Até 2 pedidos em andamento. Mantenha esta página aberta."}{message && <p>{message}</p>}{pdfUrl && <a className="secondary-button" href={pdfUrl} target="_blank" rel="noreferrer">Abrir PDF do lote ({printable.length} pedidos)</a>}{!pdfUrl && printable.length > 0 && !running && <button type="button" className="secondary-button" onClick={retryPdf}>Tentar montar o PDF novamente</button>}</div>}
       {loadError && <div className="recipient-alert recipient-alert-error">Não foi possível consultar todos os envios.</div>}
       {visible.length ? <div className="orders-table-wrap"><table className="orders-table"><thead><tr>{canGenerate && <th><input type="checkbox" aria-label="Selecionar envios visíveis" checked={allChecked} disabled={running || !visibleEligible.length} onChange={selectVisible} /></th>}<th>DESTINATÁRIO</th><th>ENTREGA</th><th>NF-E</th><th>RASTREAMENTO</th><th>PREVISÃO / FRETE</th><th>STATUS</th><th>AÇÕES</th></tr></thead><tbody>{visible.map(row => {
         const shipment = firstRelation(row.shipments); const invoice = firstRelation(row.invoices); const result = results[row.id];
@@ -107,7 +108,7 @@ export function ShippingManagement({ rows, canGenerate, loadError }: { rows: Shi
           <td><strong>{shipment?.tracking_code ?? "Aguardando código"}</strong>{shipment?.tracking_url && <small><a href={shipment.tracking_url} target="_blank" rel="noreferrer">Acompanhar entrega</a></small>}</td>
           <td><strong>{shipment?.estimated_delivery_date ? date(shipment.estimated_delivery_date + "T12:00:00") : "—"}</strong><small>{shipment?.freight_amount != null ? new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(shipment.freight_amount) : "Frete não informado"}</small><small>{shipment?.package_count ? `${shipment.package_count} volume(s)` : ""}</small></td>
           <td><span className={`order-status order-status-${row.status}`}>{statusLabel(row.status)}</span>{labelError && <small role="status" className="omie-action-result omie-action-result-error"><AlertTriangle size={14} aria-hidden="true" /> Erro na etiqueta: {labelError}</small>}{row.omie_last_error && <small role="status" className="omie-action-result omie-action-result-warning">{row.omie_last_error}</small>}</td>
-          <td>{activeId === row.id && <small role="status">Preparando etiqueta deste pedido...</small>}{result?.status === "success" && <small role="status" className="omie-action-result omie-action-result-success">{result.message}</small>}
+          <td>{activeIds.includes(row.id) && <small role="status">Preparando etiqueta deste pedido...</small>}{result?.status === "success" && <small role="status" className="omie-action-result omie-action-result-success">{result.message}</small>}
             <LabelButton id={row.id} disabled={running} ready={ready(row)} canGenerate={canGenerate && canPrepareShippingLabel(shipment?.label_generation_state ?? "none")} />
             {["processing", "unknown"].includes(shipment?.label_generation_state ?? "") && <small>Geração em andamento ou sem confirmação. Confira no Omie antes de solicitar outra etiqueta.</small>}
             <OmieActionButton disabled={running} fulfillmentId={row.id} kind="sync-shipping" size="small" />

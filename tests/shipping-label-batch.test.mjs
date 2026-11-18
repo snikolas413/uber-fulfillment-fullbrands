@@ -29,21 +29,21 @@ function makeKey(number) {
 const key = makeKey(1234);
 const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
 
-test('lote processa selecionados sequencialmente, continua após falha e reúne somente confirmados', async () => {
-  const calls = [], results = []; let active = false;
+test('lote intercala dois selecionados, continua após falha e reúne somente confirmados', async () => {
+  const calls = [], results = []; let active = 0, peak = 0;
   const ready = await batch.runShippingLabelBatch(['a', 'error', 'a', 'last'], {
-    async generate(id, confirmed) { assert.equal(confirmed, true); assert.equal(active, false); active = true; await Promise.resolve(); active = false; calls.push(id); if (id === 'error') throw new Error('Timeout'); return { status: 'success', message: 'Pronta', url: '/label/' + id }; },
+    async generate(id, confirmed) { assert.equal(confirmed, true); active++; peak = Math.max(peak, active); assert.ok(active <= 2); await Promise.resolve(); active--; calls.push(id); if (id === 'error') throw new Error('Timeout'); return { status: 'success', message: 'Pronta', url: '/label/' + id }; },
     shouldStop: () => false, onStart() {}, onResult(id, result) { results.push([id, result]); },
   });
-  assert.deepEqual(calls, ['a', 'error', 'last']); assert.deepEqual(ready, ['a', 'last']);
+  assert.deepEqual(calls, ['a', 'error', 'last']); assert.deepEqual(ready, ['a', 'last']); assert.equal(peak, 2);
   assert.equal(results[1][1].status, 'error');
   assert.match(results[1][1].message, /antes de tentar gerar novamente/);
 });
 
-test('interrupção conclui o atual; tentativas incertas não são elegíveis e lotes têm limite', async () => {
+test('interrupção conclui os dois ativos; tentativas incertas não são elegíveis e lotes têm limite', async () => {
   let stop = false; const calls = [];
   const options = { async generate(id) { calls.push(id); return { status: 'success', url: '/x', message: 'Pronta' }; }, shouldStop: () => stop, onStart() {}, onResult() { stop = true; } };
-  assert.deepEqual(await batch.runShippingLabelBatch(['a', 'b'], options), ['a']);
+  assert.deepEqual(await batch.runShippingLabelBatch(['a', 'b', 'c'], options), ['a', 'b']);
   for (const state of ['none', 'sources_ready', 'ready']) assert.equal(batch.canPrepareShippingLabel(state), true);
   for (const state of ['processing', 'unknown', 'invalid']) assert.equal(batch.canPrepareShippingLabel(state), false);
   for (const selection of [[], Array.from({ length: 101 }, (_, i) => String(i))]) await assert.rejects(batch.runShippingLabelBatch(selection, options));
@@ -61,20 +61,20 @@ test('erro de API aguarda liberação e processa o próximo, sem repetir a etiqu
         : { status: 'success', message: 'Pronta', url: '/' + id };
     },
   });
-  assert.deepEqual(calls, [['failed', 1000], ['next', 62000], ['last', 62000]]);
+  assert.deepEqual(calls, [['failed', 1000], ['next', 1000], ['last', 62000]]);
   assert.deepEqual(ready, ['next', 'last']);
-  assert.deepEqual(waits, [62000]);
+  assert.ok(waits.length > 0 && waits.every(at => at === 62000));
   assert.equal(results.length, 3);
 });
 
 test('operador pode parar durante a espera da proteção da API', async () => {
   let now = 1000, stop = false;
   const calls = [];
-  await batch.runShippingLabelBatch(['failed', 'next'], {
+  await batch.runShippingLabelBatch(['failed', 'next', 'third'], {
     now: () => now, wait: async ms => { now += ms; stop = true; }, shouldStop: () => stop,
     onStart() {}, onResult() {}, async generate(id) { calls.push(id); return { status: 'error', message: 'Pausa', retryAt: 62000 }; },
   });
-  assert.deepEqual(calls, ['failed']);
+  assert.deepEqual(calls, ['failed', 'next']);
 });
 
 async function demoLabel(number, volumes) {
@@ -129,7 +129,7 @@ test('tela oferece seleção para operação, bloqueia etiqueta incerta e não g
     react: React, 'react/jsx-runtime': jsxRuntime, 'lucide-react': icons,
     'next/navigation': { useRouter: () => ({ refresh() {} }) },
     '@/components/omie-action-button': { OmieActionButton: () => null }, './label-button': { LabelButton: () => null },
-    './label-actions': { generateShippingLabelAction() { assert.fail('Renderização não pode gerar etiqueta'); } },
+    '@/lib/omie/shipping-label-request': { prepareShippingLabel() { assert.fail('Renderização não pode gerar etiqueta'); } },
     '@/lib/omie/shipping-label-batch': batch,
   });
   const rows = ['none', 'ready', 'unknown'].map((state, i) => ({ id: String(i), status: 'billed', created_at: '2026-11-11', recipients: { full_name: `Pessoa ${i}` }, shipments: { label_generation_state: state, label_storage_path: state === 'ready' ? '/saved.pdf' : null, label_last_error: i === 2 ? 'Omie não confirmou a geração' : null }, invoices: null }));
@@ -139,4 +139,18 @@ test('tela oferece seleção para operação, bloqueia etiqueta incerta e não g
   assert.match(html, /aria-label="Selecionar envio de Pessoa 2"[^>]*disabled/);
   assert.match(html, /Erro na etiqueta: Omie não confirmou a geração/);
   assert.ok(!render(false).includes('type="checkbox"'));
+});
+
+test('pedido lento libera a outra vaga e o PDF mantém a ordem de seleção', async () => {
+  let release, reached;
+  const gate = new Promise(resolve => { release = resolve; });
+  const third = new Promise(resolve => { reached = resolve; });
+  const calls = [], finished = [];
+  const running = batch.runShippingLabelBatch(['slow', 'fast', 'third', 'fast'], {
+    async generate(id) { calls.push(id); if (id === 'slow') await gate; if (id === 'third') reached(); return { status: 'success', message: 'ok', url: '/saved/' + id }; },
+    shouldStop: () => false, onStart() {}, onResult(id) { finished.push(id); },
+  });
+  await third; assert.deepEqual(calls, ['slow', 'fast', 'third']);
+  release(); assert.deepEqual(await running, ['slow', 'fast', 'third']);
+  assert.equal(finished[0], 'fast');
 });

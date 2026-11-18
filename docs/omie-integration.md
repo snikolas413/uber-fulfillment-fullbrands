@@ -112,3 +112,9 @@ O lote de envio mantém até dois pedidos distintos em andamento. Quando um term
 A reserva individual é adquirida antes das consultas fiscais e de transportadora. Somente após essas validações o pedido passa a `order_pending`, antes da inclusão. A rota autenticada de envio reutiliza as validações da ação existente e nunca autoriza reinclusão. Inclusões com resultado incerto exigem reconciliação. O botão de parada impede novos envios e deixa os dois pedidos ativos concluírem. Mantenha a página aberta durante o lote.
 
 Continuam como propostas futuras: pré-validar o lote, ampliar o cache dos cadastros estáveis e avaliar execução em segundo plano. Medir um piloto de 10–20 pedidos antes de ampliar a concorrência; o ganho real depende dos tempos do Omie. Conferências fiscais/de vínculo e proteções contra duplicidade permanecem obrigatórias.
+
+## Expedição intercalada (18/11/2026)
+
+O lote de etiquetas também mantém até dois pedidos distintos em andamento, por requisições HTTP independentes que reutilizam a ação autenticada de geração. As chamadas Omie continuam serializadas pelo controle global. A validação de NF-e autorizada e vinculada, a reserva atômica da geração e o bloqueio de estados `processing`/`unknown` são preservados. Etiquetas salvas são reutilizadas. Uma falha encerra a tentativa daquele pedido e libera a vaga, sem repetir operações de frete ou etiqueta e respeitando a pausa global quando houver.
+
+O PDF do lote inclui somente sucessos com arquivo confirmado e mantém a ordem da seleção, mesmo quando outro pedido termina antes. “Parar novos envios” impede iniciar os pedidos restantes e permite concluir os dois ativos. A página deve permanecer aberta até concluir a preparação e montagem do PDF.
