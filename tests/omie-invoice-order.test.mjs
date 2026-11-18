@@ -14,7 +14,8 @@ function loadModule(path, modules = {}) {
 }
 const itemIcms = loadModule('../src/lib/omie/item-icms.ts');
 const invoiceNotes = loadModule('../src/lib/omie/invoice-notes.ts');
-const billing = loadModule('../src/lib/omie/invoice-order.ts', { '@/lib/omie/item-icms': itemIcms, '@/lib/omie/invoice-notes':invoiceNotes });
+const paymentPolicy = loadModule('../src/lib/omie/payment-policy.ts');
+const billing = loadModule('../src/lib/omie/invoice-order.ts', { '@/lib/omie/item-icms': itemIcms, '@/lib/omie/invoice-notes':invoiceNotes, '@/lib/omie/payment-policy': paymentPolicy });
 const freight = loadModule('../src/lib/omie/freight-selection.ts');
 const id = '11111111-1111-4111-8111-111111111111';
 const integrationCode = 'UFB-' + id.replaceAll('-', '');
@@ -33,13 +34,14 @@ function omie(options = {}) {
       orderReads++;
       if (orderReads > 1 && options.noteReadError) throw new Error('Consulta indisponível');
       return { pedido_venda_produto: {
-      cabecalho: { codigo_pedido: options.wrongOrder ? 999 : 555, codigo_pedido_integracao: integrationCode, codigo_cenario_impostos: '777', codigo_cliente: 888, etapa: options.stage ?? '10', bloqueado: options.blocked ? 'S' : 'N' },
+      lista_parcelas: { parcela: [{ data_vencimento: options.expiredPayment ? '12/11/2026' : '31/12/2026', nao_gerar_boleto: options.generateBoleto ? 'N' : 'S' }] },
+      cabecalho: { nao_gerar_boleto: 'S', codigo_pedido: options.wrongOrder ? 999 : 555, codigo_pedido_integracao: integrationCode, codigo_cenario_impostos: '777', codigo_cliente: 888, etapa: options.stage ?? '10', bloqueado: options.blocked ? 'S' : 'N' },
       infoCadastro: { faturado: options.alreadyBilled || (orderReads > 1 && options.billedDuringUpdate) ? 'S' : 'N', cancelado: options.cancelled ? 'S' : 'N' },
       frete: { codigo_transportadora: options.changedCarrier ? 999 : 123, ...(options.omitFreight ? {} : { valor_frete: options.notFree ? 12 : 0 }) },
       informacoes_adicionais: { consumidor_final: 'S', dados_adicionais_nf:notes, outros_detalhes: { cEstadoOd: 'SC', cEnderecoOd: 'Rua Teste' } },
       det: [{ ide: { codigo_item: 1234, codigo_item_integracao: 'item-teste', simples_nacional: options.simples ? 'S' : 'N' },
         produto: { codigo_produto: 987, codigo: 'R18', quantidade: 1, valor_unitario: refreshed && options.changedPrice ? 99 : 107.97, valor_total: 122.01 },
-        inf_adic: { codigo_cenario_impostos_item: '777', nao_gerar_financeiro: 'S', nao_movimentar_estoque: 'S' },
+        inf_adic: { codigo_cenario_impostos_item: '777', nao_gerar_financeiro: options.generateReceivable ? 'N' : 'S', nao_movimentar_estoque: 'S' },
         imposto: options.missingIcms && (!refreshed || options.stillMissing) ? {} : options.simples ? { icms_sn: { cod_sit_trib_icms_sn: '102', origem_icms_sn: '1', aliq_icms_sn: 0 } } : {
           icms: { cod_sit_trib_icms: '00', origem_icms: '1', modalidade_icms: '3', perc_red_base_icms: 0, aliq_icms: 4, base_icms: options.noBase ? 0 : 126.03, valor_icms: 5.04 },
         },
@@ -275,6 +277,7 @@ function actionHarness(options = {}) {
     '@/lib/omie/item-icms': itemIcms,
     '@/lib/omie/order-reference': loadModule('../src/lib/omie/order-reference.ts'),
     '@/lib/omie/invoice-notes': invoiceNotes,
+    '@/lib/omie/payment-policy': paymentPolicy,
     '@/lib/omie/client': { callOmie: upstream.args.request, OmieApiError: ApiError, OmieConfigurationError: ApiError },
   });
   return { actions, records, calls: upstream.calls };
@@ -304,4 +307,18 @@ test('ação persiste NF confirmada, mantém bloqueio após timeout e só retoma
   assert.equal(timeout.calls.filter(call => call.method === 'FaturarPedidoVenda').length, 1);
   const rejected = actionHarness({ invoice: { status: 'billing_rejected', fulfillment_id: id, omie_invoice_number: null, access_key: null } });
   assert.equal((await rejected.actions.invoiceOrderAction(id, true)).billingOutcome, 'confirmed');
+});
+
+test('bloqueia emissão com vencimento incorreto, boleto ou contas a receber ativos', async () => {
+    for (const options of [{ expiredPayment: true }, { generateBoleto: true }, { generateReceivable: true }]) {
+      const { args, calls } = omie(options); const result = await billing.invoiceExistingOrder(args);
+      assert.equal(result.outcome, 'rejected'); assert.ok(result.message.includes('31/12/2026'));
+      assert.deepEqual(calls.map(call => call.method), ['ConsultarPedido']);
+    }
+  });
+
+test('Omie sem parcelas e com todos os itens sem financeiro atende à política', () => {
+ assert.equal(paymentPolicy.hasNoReceivablesPolicy({det:[{inf_adic:{nao_gerar_financeiro:'S'}}],lista_parcelas:{parcela:[]}}),true);
+ assert.equal(paymentPolicy.hasNoReceivablesPolicy({det:[{inf_adic:{nao_gerar_financeiro:'N'}}],lista_parcelas:{parcela:[]}}),false);
+ assert.equal(paymentPolicy.hasNoReceivablesPolicy({det:[],lista_parcelas:{parcela:[]}}),false);
 });

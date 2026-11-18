@@ -8,6 +8,7 @@ import { invoiceExistingOrder, type BillingOutcome, type BillingControlState } f
 import { simulateItemTaxes, ItemIcmsError } from "@/lib/omie/item-icms";
 import { ORDER_REFERENCE as reference } from "@/lib/omie/order-reference";
 import { DELIVERY_INVOICE_NOTE } from "@/lib/omie/invoice-notes";
+import { initialPaymentSchedule, PAYMENT_TERMS_CODE } from "@/lib/omie/payment-policy";
 
 export type OmieActionResult = { status: "success" | "error" | "warning"; message: string };
 type Recipient = { full_name: string; document_number: string | null; email: string | null; phone: string | null };
@@ -159,9 +160,11 @@ async function includeOrder(supabase: Awaited<ReturnType<typeof createSupabaseSe
     cabecalho: {
       codigo_cliente: row.omie_customer_id ?? 2867720329,
       codigo_pedido_integracao: integrationCode(row.id),
-      data_previsao: todayInSaoPaulo(), etapa: "10", codigo_parcela: "000", qtde_parcelas: 1, quantidade_itens: 1,
+      data_previsao: todayInSaoPaulo(), etapa: "10", codigo_parcela: PAYMENT_TERMS_CODE, qtde_parcelas: 1, quantidade_itens: 1,
+      nao_gerar_boleto: "S",
       ...(row.omie_tax_scenario_id ? { codigo_cenario_impostos: row.omie_tax_scenario_id } : {}),
     },
+    lista_parcelas: initialPaymentSchedule(),
     frete: { codigo_transportadora: carrierId },
     exportacao: { nao_exportacao: "N" },
     informacoes_adicionais: {
@@ -190,7 +193,7 @@ async function includeOrder(supabase: Awaited<ReturnType<typeof createSupabaseSe
         ...(row.omie_tax_scenario_id ? { codigo_cenario_impostos_item: row.omie_tax_scenario_id } : {}),
         numero_pedido_compra: "", item_pedido_compra: 0,
         codigo_categoria_item: reference.category, codigo_local_estoque: reference.warehouseId,
-        nao_movimentar_estoque: "N", nao_gerar_financeiro: "N", nao_somar_total: "N",
+        nao_movimentar_estoque: "N", nao_gerar_financeiro: "S", nao_somar_total: "N",
         dados_adicionais_item: "", peso_bruto: 0, peso_liquido: 0,
       },
     }],

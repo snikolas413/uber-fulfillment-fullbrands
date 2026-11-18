@@ -48,3 +48,8 @@ teste manual deve conferir a gravação dos impostos de um novo pedido antes de
 qualquer emissão.
 
 Contrato da API: https://app.omie.com.br/api/v1/produtos/pedido/
+
+
+## Exceção vigente: financeiro e vencimento
+
+Desde 18/11/2026, por decisão operacional, as novas inclusões não reproduzem o financeiro do modelo 1107. Usam `nao_gerar_financeiro = S`, condição personalizada `999`, vencimento em 31/12/2026 e `nao_gerar_boleto = S` no cabeçalho e na parcela. O estoque permanece com `nao_movimentar_estoque = N`.

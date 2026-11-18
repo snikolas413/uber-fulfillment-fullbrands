@@ -16,7 +16,8 @@ function loadModule(path, modules = {}) {
 const freight = loadModule('../src/lib/omie/freight-selection.ts');
 const itemIcms = loadModule('../src/lib/omie/item-icms.ts');
 const invoiceNotes = loadModule('../src/lib/omie/invoice-notes.ts');
-const billing = loadModule('../src/lib/omie/invoice-order.ts', { '@/lib/omie/item-icms': itemIcms, '@/lib/omie/invoice-notes':invoiceNotes });
+const paymentPolicy = loadModule('../src/lib/omie/payment-policy.ts');
+const billing = loadModule('../src/lib/omie/invoice-order.ts', { '@/lib/omie/item-icms': itemIcms, '@/lib/omie/invoice-notes':invoiceNotes, '@/lib/omie/payment-policy': paymentPolicy });
 const id = '11111111-1111-4111-8111-111111111111';
 const integrationCode = 'UFB-' + id.replaceAll('-', '');
 const mini = { nIdFrete: 987, cTipoServico: '04227', cDescricaoServico: 'Mini Envios', cNomeTransportadora: 'CORREIOS', nDiasEntrega: 5, nValorFrete: 12.5 };
@@ -179,6 +180,7 @@ function actionsStub(options = {}) {
     '@/lib/omie/item-icms': itemIcms,
     '@/lib/omie/order-reference': loadModule('../src/lib/omie/order-reference.ts'),
     '@/lib/omie/invoice-notes': invoiceNotes,
+    '@/lib/omie/payment-policy': paymentPolicy,
     '@/lib/omie/client': { callOmie: omie.request, OmieApiError: ApiError, OmieConfigurationError: ApiError },
   });
   return { actions, writes, audits, shipments, calls: omie.calls };
@@ -200,7 +202,10 @@ test('criação segue referência 1107 com impostos completos, e-mail do destina
   assert.equal(payload.det[0].produto.ean, '0035399175763');
   assert.equal(payload.det[0].inf_adic.codigo_local_estoque, 1579847408);
   assert.equal(payload.det[0].inf_adic.nao_movimentar_estoque, 'N');
-  assert.equal(payload.det[0].inf_adic.nao_gerar_financeiro, 'N');
+  assert.equal(payload.det[0].inf_adic.nao_gerar_financeiro, 'S');
+  assert.equal(payload.cabecalho.codigo_parcela, '999');
+  assert.equal(payload.cabecalho.nao_gerar_boleto, 'S');
+  assert.deepEqual(payload.lista_parcelas, { parcela: [{ numero_parcela: 1, percentual: 100, data_vencimento: '31/12/2026', nao_gerar_boleto: 'S' }] });
   assert.equal(payload.informacoes_adicionais.utilizar_emails, 'teste@example.com');
   assert.equal(payload.informacoes_adicionais.dados_adicionais_nf,'Entrega em domicílio de terceiro destinatário não contribuinte do ICMS');
   assert.deepEqual(payload.frete, { codigo_transportadora: 123 }); assert.equal(payload.det[0].inf_adic.numero_pedido_compra, '');

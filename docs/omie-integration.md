@@ -30,8 +30,8 @@ O webhook que aparece na tela da integração Omie não é necessário ao fluxo 
 - Unidade `PC`, NCM `8517.62.99`.
 - Padrão aprovado em 11/11/2026: pedido 1107, uma unidade a R$ 95,54, preço fixo e PO vazio.
 - Cenário observado em venda para entrega futura: ID `2954399884`, descrição `5.117/6.117`, com CFOP de item `6.117`.
-- Pedidos recentes consultados usam etapa inicial `10`, parcela `000`, categoria `1.01.03`, conta corrente `2611948369`, consumidor final `S`, e-mail automático `N`.
-- Novas inclusões seguem o pedido 1107: `nao_movimentar_estoque = N` e `nao_gerar_financeiro = N`; estoque 1579847408.
+- Pedidos recentes consultados usam etapa inicial `10`, parcela personalizada `999`, categoria `1.01.03`, conta corrente `2611948369`, consumidor final `S`, e-mail automático `N`.
+- Novas inclusões seguem o pedido 1107: `nao_movimentar_estoque = N` e `nao_gerar_financeiro = S`; estoque 1579847408.
 - Esses valores são referências reais observadas, não substituem a aprovação fiscal/comercial antes do primeiro pedido real.
 
 ## Endereço e e-mail do motorista
@@ -95,3 +95,10 @@ A validação confirmou as colunas de e-mail, sincronização, DANFE e frete; a 
 - Fazer o primeiro pedido com supervisão do operador, depois testar consulta e conciliação.
 - O botão de faturamento pode emitir NF-e real e exige confirmação explícita.
 - A expedição será validada usando a integração Correios dentro do Omie, sem duplicar integração externa.
+
+
+## Política financeira atual (18/11/2026)
+
+Novos pedidos usam condição personalizada `999`, uma parcela de 100% com vencimento em **31/12/2026**, `cabecalho.nao_gerar_boleto = S`, `parcela.nao_gerar_boleto = S` e `det[].inf_adic.nao_gerar_financeiro = S`. A movimentação de estoque permanece habilitada. A preparação local não gera títulos nem boletos. O faturamento confere essa política antes de solicitar emissão; pedidos antigos precisam estar corrigidos no Omie. A manutenção de vencimentos e flags não solicita faturamento.
+
+Conferência real no Omie: quando todos os itens usam `nao_gerar_financeiro = S`, o ERP remove as parcelas e pode omitir o padrão `nao_gerar_boleto` nas consultas. Sem parcelas, não há vencimento ou boleto gerado. A conferência aceita esse retorno; se houver parcelas, exige 31/12/2026 e não gerar boleto em cada uma.

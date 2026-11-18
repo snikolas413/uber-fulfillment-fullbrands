@@ -72,8 +72,8 @@ A publicação desta edição requer aplicar a migration
 - Produto REMOTE BUTTON, código `R18`, ID Omie `2948561716`, unidade PC, NCM `8517.62.99`.
 - Padrão aprovado em 11/11/2026: pedido 1107, uma unidade a R$ 95,54, preço fixo e PO vazio.
 - Cenário de venda para entrega futura ID `2954399884`, CFOP de item observado `6.117`.
-- Novos pedidos recentes consultados usam etapa inicial `10`, parcela `000`, categoria `1.01.03`, conta corrente `2611948369`, consumidor final `S`.
-- Novas inclusões seguem o pedido 1107: `nao_movimentar_estoque = N` e `nao_gerar_financeiro = N`; estoque 1579847408.
+- Novos pedidos recentes consultados usam etapa inicial `10`, parcela personalizada `999`, categoria `1.01.03`, conta corrente `2611948369`, consumidor final `S`.
+- Novas inclusões seguem o pedido 1107: `nao_movimentar_estoque = N` e `nao_gerar_financeiro = S`; estoque 1579847408.
 
 Esses valores são referências reais do Omie consultadas para desenhar a integração. Antes do primeiro envio é necessária confirmação do responsável fiscal/comercial de que continuam aplicáveis à operação corrente.
 
@@ -157,3 +157,10 @@ Referência: [Limites de Consumo da API do Omie](https://ajuda.omie.com.br/pt-BR
 - Credenciais próprias do app Omie (app_hash, access token, refresh token e timestamp ISO do primeiro token) no Render.
 - Confirmação fiscal/comercial dos parâmetros de venda e faturamento antes do primeiro pedido real.
 - Teste assistido de inclusão, sincronização, faturamento e leitura de expedição após o deploy. Não execute faturamento real sem conferência e confirmação explícita.
+
+
+## Política financeira atual (18/11/2026)
+
+Novos pedidos usam condição personalizada `999`, uma parcela de 100% com vencimento em **31/12/2026**, `cabecalho.nao_gerar_boleto = S`, `parcela.nao_gerar_boleto = S` e `det[].inf_adic.nao_gerar_financeiro = S`. A movimentação de estoque permanece habilitada. A preparação local não gera títulos nem boletos. O faturamento confere essa política antes de solicitar emissão; pedidos antigos precisam estar corrigidos no Omie. A manutenção de vencimentos e flags não solicita faturamento.
+
+Conferência real no Omie: quando todos os itens usam `nao_gerar_financeiro = S`, o ERP remove as parcelas e pode omitir o padrão `nao_gerar_boleto` nas consultas. Sem parcelas, não há vencimento ou boleto gerado. A conferência aceita esse retorno; se houver parcelas, exige 31/12/2026 e não gerar boleto em cada uma.

@@ -1,5 +1,6 @@
 import { simulateItemTaxes, hasCompleteItemIcms } from "@/lib/omie/item-icms";
 import { withDeliveryInvoiceNote, sameInvoiceNotes } from "@/lib/omie/invoice-notes";
+import { hasNoReceivablesPolicy, type PaymentOrder } from "@/lib/omie/payment-policy";
 
 export type BillingOutcome = "confirmed" | "submitted" | "unknown" | "rejected" | "blocked";
 export type BillingControlState = "billing_processing" | "billing_submitted" | "billing_unknown" | "billing_rejected";
@@ -15,8 +16,8 @@ type BillingItem = {
   inf_adic?: { codigo_cenario_impostos_item?: number | string; nao_gerar_financeiro?: string; nao_movimentar_estoque?: string };
   imposto?: Record<string, unknown>;
 };
-type BillingOrder = {
-  cabecalho?: { codigo_pedido?: number; codigo_pedido_integracao?: string; codigo_cenario_impostos?: number | string; codigo_cliente?: number; etapa?: string; bloqueado?: string };
+type BillingOrder = Omit<PaymentOrder, "cabecalho" | "det"> & {
+  cabecalho?: { codigo_parcela?: string; nao_gerar_boleto?: string; codigo_pedido?: number; codigo_pedido_integracao?: string; codigo_cenario_impostos?: number | string; codigo_cliente?: number; etapa?: string; bloqueado?: string };
   informacoes_adicionais?: { consumidor_final?: string; dados_adicionais_nf?: string; outros_detalhes?: { cEstadoOd?: string } };
   infoCadastro?: { faturado?: string; cancelado?: string };
   frete?: { codigo_transportadora?: number; valor_frete?: number; valor_seguro?: number; outras_despesas?: number };
@@ -82,6 +83,7 @@ export async function invoiceExistingOrder({ request, orderId, integrationCode, 
       return { outcome: "confirmed", message: "O pedido já estava faturado no Omie. Dados sincronizados, sem nova emissão.", snapshot };
     }
     if (order.cabecalho.bloqueado === "S") throw new Error("Pedido bloqueado no Omie. Confira a liberação antes de faturar.");
+    if (!hasNoReceivablesPolicy(order)) throw new Error("Corrija o vencimento para 31/12/2026 e confirme que o pedido não gera contas a receber nem boletos antes de faturar. Nenhuma emissão foi solicitada.");
     if (!["10", "20", "30", "40", "50"].includes(String(order.cabecalho.etapa))) throw new Error("A etapa atual do Omie não permite este faturamento.");
     const amount = order.frete?.valor_frete === undefined ? 0 : order.frete.valor_frete;
     if (order.frete?.codigo_transportadora !== carrierId || !Number.isFinite(amount) || amount !== 0) throw new Error("Confira a transportadora e o frete grátis no Omie antes de faturar.");
@@ -108,6 +110,7 @@ export async function invoiceExistingOrder({ request, orderId, integrationCode, 
       if (!sameInvoiceNotes(saved.informacoes_adicionais?.dados_adicionais_nf, requiredNotes)) {
         throw new Error("O Omie não confirmou a frase de entrega nas informações complementares, preservando as observações anteriores. Nenhuma emissão foi solicitada.");
       }
+      if (!hasNoReceivablesPolicy(saved)) throw new Error("A configuração sem contas a receber e sem boleto não foi preservada. Nenhuma emissão foi solicitada.");
       for (const original of refreshItems) {
         const item = saved.det?.find(candidate => candidate.ide?.codigo_item === original.ide.codigo_item);
         if (!item || item.produto?.codigo_produto !== original.produto.codigo_produto || item.produto.quantidade !== original.produto.quantidade ||
