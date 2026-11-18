@@ -2,15 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LoaderCircle, MapPin, PackageCheck, Printer, Search, ShieldCheck, Truck } from "lucide-react";
+import { AlertTriangle, LoaderCircle, MapPin, PackageCheck, Printer, Search, ShieldCheck, Truck } from "lucide-react";
 import { OmieActionButton } from "@/components/omie-action-button";
 import { LabelButton } from "./label-button";
 import { generateShippingLabelAction, type LabelResult } from "./label-actions";
 import { canPrepareShippingLabel, runShippingLabelBatch } from "@/lib/omie/shipping-label-batch";
 
-type Shipment = { tracking_code: string | null; tracking_url: string | null; estimated_delivery_date: string | null; package_count: number | null; label_storage_path: string | null; label_generation_state: string; freight_amount: number | null };
+type Shipment = { tracking_code: string | null; tracking_url: string | null; estimated_delivery_date: string | null; package_count: number | null; label_storage_path: string | null; label_generation_state: string; label_last_error?: string | null; label_error_at?: string | null; freight_amount: number | null };
 type Invoice = { omie_invoice_number: string | null; access_key: string | null; status: string };
-export type ShippingRow = { id: string; delivery_recipient_name?: string | null; status: string; created_at: string; recipients: { full_name: string } | null; delivery_addresses: { city: string; state: string; postal_code: string } | null; shipments: Shipment | Shipment[] | null; invoices: Invoice | Invoice[] | null };
+export type ShippingRow = { id: string; delivery_recipient_name?: string | null; omie_last_error?: string | null; status: string; created_at: string; recipients: { full_name: string } | null; delivery_addresses: { city: string; state: string; postal_code: string } | null; shipments: Shipment | Shipment[] | null; invoices: Invoice | Invoice[] | null };
 function firstRelation<T>(value: T | T[] | null | undefined): T | null { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
 const statusLabel = (status: string) => ({ billed: "Faturado · aguardando expedição", billing_pending: "Conferir confirmação da NF-e", shipping_pending: "Aguardando etiqueta", label_ready: "Etiqueta disponível", shipped: "Enviado" })[status] ?? status;
 const date = (value: string) => new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(new Date(value));
@@ -63,7 +63,9 @@ export function ShippingManagement({ rows, canGenerate, loadError }: { rows: Shi
           const row = chosen.find(row => row.id === id)!;
           return ready(row) ? { status: "success", message: "Etiqueta salva reutilizada, sem nova geração no Omie.", url: `/api/expedicao/${id}/etiqueta` } : generateShippingLabelAction(id, true);
         },
-        shouldStop: () => stopRef.current, onStart: setActiveId,
+        shouldStop: () => stopRef.current,
+        onStart(id) { setActiveId(id); setMessage(""); },
+        onWait(retryAt) { setActiveId(null); setMessage("Aguardando a liberação do Omie até " + new Date(retryAt).toLocaleTimeString("pt-BR") + ". O lote continuará com o próximo pedido."); },
         onResult(id, result) { setResults(current => ({ ...current, [id]: result })); setCompleted(current => current + 1); setSelected(current => current.filter(value => value !== id)); },
       });
       setActiveId(null); setPrintable(successIds);
@@ -95,6 +97,8 @@ export function ShippingManagement({ rows, canGenerate, loadError }: { rows: Shi
       {loadError && <div className="recipient-alert recipient-alert-error">Não foi possível consultar todos os envios.</div>}
       {visible.length ? <div className="orders-table-wrap"><table className="orders-table"><thead><tr>{canGenerate && <th><input type="checkbox" aria-label="Selecionar envios visíveis" checked={allChecked} disabled={running || !visibleEligible.length} onChange={selectVisible} /></th>}<th>DESTINATÁRIO</th><th>ENTREGA</th><th>NF-E</th><th>RASTREAMENTO</th><th>PREVISÃO / FRETE</th><th>STATUS</th><th>AÇÕES</th></tr></thead><tbody>{visible.map(row => {
         const shipment = firstRelation(row.shipments); const invoice = firstRelation(row.invoices); const result = results[row.id];
+        const labelError = result?.status === "success" ? null : result?.status === "error" ? result.message : shipment?.label_last_error ??
+          (shipment?.label_generation_state === "unknown" ? "Geração sem confirmação. Confira a etiqueta no Omie antes de solicitar novamente." : null);
         return <tr key={row.id}>
           {canGenerate && <td><input type="checkbox" aria-label={`Selecionar envio de ${row.recipients?.full_name ?? row.id}`} checked={selected.includes(row.id)} disabled={running || !eligible(row) || (!selected.includes(row.id) && chosen.length >= 100)} onChange={event => setSelected(current => event.target.checked ? [...current, row.id] : current.filter(id => id !== row.id))} /></td>}
           <td><strong>{row.delivery_recipient_name ?? row.recipients?.full_name ?? "Destinatário indisponível"}</strong><small>{date(row.created_at)}</small></td>
@@ -102,8 +106,8 @@ export function ShippingManagement({ rows, canGenerate, loadError }: { rows: Shi
           <td>{invoice?.omie_invoice_number ?? "—"}</td>
           <td><strong>{shipment?.tracking_code ?? "Aguardando código"}</strong>{shipment?.tracking_url && <small><a href={shipment.tracking_url} target="_blank" rel="noreferrer">Acompanhar entrega</a></small>}</td>
           <td><strong>{shipment?.estimated_delivery_date ? date(shipment.estimated_delivery_date + "T12:00:00") : "—"}</strong><small>{shipment?.freight_amount != null ? new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(shipment.freight_amount) : "Frete não informado"}</small><small>{shipment?.package_count ? `${shipment.package_count} volume(s)` : ""}</small></td>
-          <td><span className={`order-status order-status-${row.status}`}>{statusLabel(row.status)}</span></td>
-          <td>{activeId === row.id && <small role="status">Preparando etiqueta deste pedido...</small>}{result && <small role="status" className={`omie-action-result omie-action-result-${result.status}`}>{result.message}</small>}
+          <td><span className={`order-status order-status-${row.status}`}>{statusLabel(row.status)}</span>{labelError && <small role="status" className="omie-action-result omie-action-result-error"><AlertTriangle size={14} aria-hidden="true" /> Erro na etiqueta: {labelError}</small>}{row.omie_last_error && <small role="status" className="omie-action-result omie-action-result-warning">{row.omie_last_error}</small>}</td>
+          <td>{activeId === row.id && <small role="status">Preparando etiqueta deste pedido...</small>}{result?.status === "success" && <small role="status" className="omie-action-result omie-action-result-success">{result.message}</small>}
             <LabelButton id={row.id} disabled={running} ready={ready(row)} canGenerate={canGenerate && canPrepareShippingLabel(shipment?.label_generation_state ?? "none")} />
             {["processing", "unknown"].includes(shipment?.label_generation_state ?? "") && <small>Geração em andamento ou sem confirmação. Confira no Omie antes de solicitar outra etiqueta.</small>}
             <OmieActionButton disabled={running} fulfillmentId={row.id} kind="sync-shipping" size="small" />

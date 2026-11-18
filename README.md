@@ -21,6 +21,10 @@ https://uber-fulfillment-fullbrands.onrender.com
 
 O app se integra ao Omie exclusivamente no servidor. O pedido pode ser criado com ação explícita; faturamento exige confirmação separada. Após a criação, a aplicação tenta cotar e selecionar Mini Envios pela API de Frete do Omie, com frete grátis para o cliente. Etiqueta e postagem continuam no fluxo Correios do ERP; a aplicação consulta os dados resultantes.
 
+Na Expedição, uma falha de etiqueta fica registrada no pedido e no histórico. O lote segue para os próximos pedidos; se a API estiver pausada, aguarda a liberação indicada antes de continuar. A etiqueta que falhou não é repetida automaticamente. Resultados sem confirmação exigem conferência no Omie, e o PDF do lote reúne somente etiquetas concluídas. O aviso permanece após atualizar a página e é limpo quando a etiqueta é concluída com sucesso.
+
+Inclusão de pedidos, seleção de frete e faturamento seguem a mesma regra: o primeiro erro encerra as etapas daquele pedido, salva o motivo na linha e no histórico e deixa o lote avançar. Recusas de negócio e consultas redundantes não pausam outros pedidos. Bloqueio de consumo, autenticação e indisponibilidade geral respeitam a pausa da API antes de iniciar o próximo pedido, sem reenviar a operação que falhou. Operações concorrentes aguardam a reserva compartilhada, em vez de transformar uma ocupação temporária em erro do pedido.
+
 ## Executar localmente
 ```bash
 cp .env.example .env.local

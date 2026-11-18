@@ -50,6 +50,16 @@ test('não usa valores padrão para dados fiscais ausentes, fora da faixa ou com
   await assert.rejects(resolveItemIcms(async () => assert.fail('Não pode consultar sem cenário'), { ...args, scenarioId: 0 }));
 });
 
+test('falha ao consultar cenário encerra o pedido antes de consultar produto; outro pedido continua', async () => {
+  const calls = [];
+  await assert.rejects(resolveItemIcms(async (endpoint, method) => {
+    calls.push(method); throw new Error('Cenário indisponível');
+  }, args), /Cenário indisponível/);
+  assert.deepEqual(calls, ['ListarImpostosCenario']);
+  const next = stub();
+  assert.equal((await resolveItemIcms(next.request, args)).icms.cod_sit_trib_icms, '00');
+});
+
 test('preserva parâmetros dos outros tributos, sem reenviar bases e valores anteriores ou campos somente leitura', () => {
   assert.deepEqual(preserveOtherItemTaxes({
     ipi: { cod_sit_trib_ipi: '50', aliq_ipi: 13, base_ipi: 500, valor_ipi: 65 },

@@ -43,3 +43,19 @@ test('lote vazio ou acima do limite não solicita emissão', async () => {
     await assert.rejects(runBillingBatch(ids, { onStart() {}, onResult() {}, async invoice() { assert.fail('Não pode emitir'); } }));
   }
 });
+
+test('faturamento espera pausa geral e segue para o próximo, sem reemitir o pedido com erro', async () => {
+  let now = 1000;
+  const calls = [], waits = [];
+  const processed = await runBillingBatch(['failed', 'next'], {
+    now: () => now, wait: async ms => { now += ms; }, onWait: at => waits.push(at),
+    onStart() {}, onResult() {}, async invoice(id) {
+      calls.push([id, now]);
+      return id === 'failed' ? { status: 'warning', message: 'API indisponível', billingOutcome: 'unknown', retryAt: 62000 }
+        : { status: 'success', message: 'Confirmado', billingOutcome: 'confirmed' };
+    },
+  });
+  assert.deepEqual(calls, [['failed', 1000], ['next', 62000]]);
+  assert.deepEqual(processed, ['failed', 'next']);
+  assert.deepEqual(waits, [62000]);
+});

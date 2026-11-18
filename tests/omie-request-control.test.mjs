@@ -66,27 +66,22 @@ test('leituras fiscais e de pedidos são novas e aguardam antes da chamada redun
   }
 });
 
-test('qualquer falha interrompe a fila e não reexecuta leitura, cotação, inclusão, seleção ou faturamento', async () => {
+test('falha de um pedido não pausa os próximos e nunca repete a chamada daquele pedido', async () => {
   for (const method of ['ConsultarCliente', 'ConsultarPedido', 'CotarFrete', 'IncluirPedido', 'SelecionarFrete', 'FaturarPedidoVenda']) {
     const h = harness(); let calls = 0;
     const request = async () => { calls++; throw new Error('Falha no Omie'); };
-    const results = await Promise.allSettled(Array.from({ length: 12 }, () => h.control('/api/', method, {}, request)));
+    await assert.rejects(h.control('/api/', method, { id: 1 }, request), /Falha no Omie/);
     assert.equal(calls, 1);
-    assert.ok(results.every(result => result.status === 'rejected'));
-    assert.deepEqual(h.finishes, [61]);
-    // Local refusals must not extend the upstream cooldown.
-    const until = h.shared.pausedUntil;
-    await assert.rejects(h.control('/api/', 'OutroMetodo', {}, request));
-    assert.equal(h.shared.pausedUntil, until);
-    h.advance(61_001);
-    assert.equal(await h.control('/api/', method, {}, async () => 'ok'), 'ok');
+    assert.deepEqual(h.finishes, [0]);
+    assert.equal(h.shared.pausedUntil, 0);
+    assert.equal(await h.control('/api/', method, { id: 2 }, async () => 'ok'), 'ok');
   }
 });
 
 test('425 pausa por 30 minutos; Retry-After e prazo da mensagem são respeitados', async () => {
   assert.equal(pauseSeconds({ httpStatus: 425 }), 1_800);
   assert.equal(pauseSeconds({ httpStatus: 429, retryAfterSeconds: 3_600 }), 3_600);
-  assert.equal(pauseSeconds({ code: 'REDUNDANT', message: 'Aguarde 95 segundos' }), 96);
+  assert.equal(pauseSeconds({ code: 'REDUNDANT', message: 'Aguarde 95 segundos' }), 0);
   assert.equal(pauseSeconds({ message: 'API bloqueada. Aguarde 30 minutos' }), 1_801);
   const h = harness();
   await assert.rejects(h.control('/api/', 'ConsultarPedido', {}, async () => { throw Object.assign(new Error('Consumo indevido'), { httpStatus: 425 }); }));
@@ -95,11 +90,32 @@ test('425 pausa por 30 minutos; Retry-After e prazo da mensagem são respeitados
 
 test('pausa persistida bloqueia outro processo e falha no controle nunca chama a API', async () => {
   const h = harness();
-  await assert.rejects(h.control('/api/', 'IncluirPedido', {}, async () => { throw new Error('Erro'); }));
+  await assert.rejects(h.control('/api/', 'IncluirPedido', {}, async () => { throw Object.assign(new Error('Limite da API'), { httpStatus: 429 }); }));
   const restarted = harness(h.shared);
   await assert.rejects(restarted.control('/api/', 'IncluirPedido', {}, () => assert.fail('Sem chamada após reinício')));
   const broken = createOmieRequestControl({ async acquire() { throw new Error('Banco indisponível'); }, async finish() { assert.fail(); } });
   await assert.rejects(broken('/api/', 'IncluirPedido', {}, () => assert.fail('Não pode enviar sem proteção')));
+});
+
+test('recusa fiscal ou de frete não bloqueia outra operação; REDUNDANT só limita a mesma consulta', async () => {
+  for (const code of ['FISCAL_INVALID', 'FRETE_INDISPONIVEL']) {
+    const h = harness();
+    await assert.rejects(h.control('/api/', 'ValidarPedidoVenda', { id: 1 }, async () => {
+      throw Object.assign(new Error('Dados do pedido inválidos'), { httpStatus: 500, code });
+    }));
+    assert.equal(await h.control('/api/', 'GerarEtiqueta', { id: 2 }, async () => 'ok'), 'ok');
+    assert.deepEqual(h.finishes, [0, 0]);
+  }
+  const h = harness();
+  await assert.rejects(h.control('/pedido/', 'StatusPedido', { id: 1 }, async () => {
+    throw Object.assign(new Error('REDUNDANT. Aguarde 95 segundos'), { code: 'REDUNDANT', httpStatus: 500 });
+  }));
+  const before = h.time();
+  await h.control('/pedido/', 'StatusPedido', { id: 2 }, async () => 'ok');
+  assert.equal(h.time() - before, 300);
+  await h.control('/pedido/', 'StatusPedido', { id: 1 }, async () => 'ok');
+  assert.ok(h.waits.some(ms => ms > 90_000));
+  assert.equal(h.shared.pausedUntil, 0);
 });
 
 test('falha ao liberar reserva após resposta não repete a escrita e bloqueia próximas chamadas', async () => {

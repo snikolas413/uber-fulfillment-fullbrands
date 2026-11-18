@@ -9,8 +9,9 @@ import { composeShippingLabel } from "@/lib/omie/shipping-label-pdf";
 import { getLabelSources, type LabelState } from "@/lib/omie/generate-shipping-label";
 import { isMiniEnviosName } from "@/lib/omie/freight-selection";
 
-export type LabelResult = { status: "success" | "error"; message: string; url?: string };
+export type LabelResult = { status: "success" | "error"; message: string; url?: string; retryAt?: number };
 export async function generateShippingLabelAction(id: string, confirmed = false): Promise<LabelResult> {
+  let reportFailure: ((message: string, retryAt?: number) => Promise<void>) | undefined;
   try {
     if (!confirmed || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) throw new Error("Confirme o pedido para gerar a etiqueta.");
     const db = await createSupabaseServerClient();
@@ -20,6 +21,13 @@ export async function generateShippingLabelAction(id: string, confirmed = false)
     if (profileError || !profile?.is_active || !["admin", "gestor", "operador"].includes(profile.role)) throw new Error("Seu perfil não tem permissão para gerar etiquetas.");
     const { data: row, error } = await db.from("fulfillments").select("id,status,omie_order_id").eq("id", id).maybeSingle();
     if (error || !row?.omie_order_id || !["billing_pending", "billed", "shipping_pending", "label_ready", "shipped"].includes(row.status)) throw new Error("Pedido indisponível para expedição.");
+    reportFailure = async (message, retryAt) => {
+      const at = new Date().toISOString();
+      const { error: saveError } = await db.from("shipments").update({ label_last_error: message.slice(0, 1200), label_error_at: at }).eq("fulfillment_id", id);
+      const { error: auditError } = await db.from("audit_logs").insert({ actor_id: auth.user.id, entity_type: "fulfillment", entity_id: id,
+        action: "shipping.label_failed", source: "application", after_summary: { message: message.slice(0, 1200), ...(retryAt ? { retry_at: new Date(retryAt).toISOString() } : {}) } });
+      if (saveError || auditError) throw new Error("Não foi possível registrar o aviso da etiqueta.");
+    };
     const invoice = await readShippingInvoice(callOmie, Number(row.omie_order_id), "UFB-" + id.replaceAll("-", ""));
     const { error: invoiceError } = await db.from("invoices").upsert({ fulfillment_id: id, access_key: invoice.key, omie_invoice_number: invoice.number,
       series: invoice.series, status: "006", ...(invoice.issuedAt ? { issued_at: invoice.issuedAt } : {}) }, { onConflict: "fulfillment_id" });
@@ -33,7 +41,10 @@ export async function generateShippingLabelAction(id: string, confirmed = false)
     if (shipmentError || !shipment) throw new Error("A atualização de etiquetas ainda não está disponível no banco.");
     if (shipment.label_invoice_key && shipment.label_invoice_key !== invoice.key) throw new Error("A NF-e do pedido mudou. Confira o documento antes de reimprimir a etiqueta.");
     const url = "/api/expedicao/" + id + "/etiqueta";
-    if (shipment.label_generation_state === "ready" && shipment.label_storage_path) return { status: "success", message: "Etiqueta já disponível para reimpressão.", url };
+    if (shipment.label_generation_state === "ready" && shipment.label_storage_path) {
+      await db.from("shipments").update({ label_last_error: null, label_error_at: null }).eq("fulfillment_id", id);
+      return { status: "success", message: "Etiqueta já disponível para reimpressão.", url };
+    }
     if (!(shipment.service_code === "04227" || isMiniEnviosName(shipment.service_code ?? "")) || Number(shipment.carrier_id) !== 2757271756) throw new Error("Confirme Correios + Mini Envios no pedido antes de gerar a etiqueta.");
     const volumes = Number(shipment.package_count ?? 1);
     if (!Number.isInteger(volumes) || volumes < 1 || volumes > 20) throw new Error("Confira a quantidade de volumes do pedido (1 a 20).");
@@ -70,7 +81,7 @@ export async function generateShippingLabelAction(id: string, confirmed = false)
     const path = prefix + "/etiqueta-nfe-v1.pdf";
     const { error: uploadError } = await bucket.upload(path, combined, { contentType: "application/pdf", upsert: true });
     if (uploadError) throw new Error("O PDF foi montado, mas não pôde ser armazenado. Repita a montagem para recuperar o arquivo, sem nova geração no Omie.");
-    await update({ label_storage_path: path, label_generation_state: "ready" });
+    await update({ label_storage_path: path, label_generation_state: "ready", label_last_error: null, label_error_at: null });
     const { error: statusError } = await db.from("fulfillments").update({ status: "label_ready" }).eq("id", id).in("status", ["billing_pending", "billed", "shipping_pending", "label_ready"]);
     if (statusError) throw new Error("A etiqueta foi salva, mas a sincronização local não foi concluída. Atualize o pedido.");
     await db.from("audit_logs").insert({ actor_id: auth.user.id, entity_type: "fulfillment", entity_id: id, action: "shipping.label_ready", source: "application",
@@ -78,6 +89,13 @@ export async function generateShippingLabelAction(id: string, confirmed = false)
     revalidatePath("/expedicao"); revalidatePath("/pedidos"); revalidatePath("/faturamento");
     return { status: "success", message: "Etiqueta dos Correios com NF-e pronta em 100 × 150 mm. Imprima em tamanho real (100%).", url };
   } catch (error) {
-    return { status: "error", message: error instanceof Error ? error.message : "Não foi possível preparar a etiqueta." };
+    let message = error instanceof Error ? error.message : "Não foi possível preparar a etiqueta.";
+    const value = (error as { retryAt?: unknown } | null)?.retryAt;
+    const retryAt = typeof value === "number" && Number.isFinite(value) ? value : undefined;
+    if (reportFailure) {
+      try { await reportFailure(message, retryAt); revalidatePath("/expedicao"); }
+      catch { message += " O aviso não pôde ser salvo; mantenha este resultado para conferência."; }
+    }
+    return { status: "error", message, ...(retryAt ? { retryAt } : {}) };
   }
 }

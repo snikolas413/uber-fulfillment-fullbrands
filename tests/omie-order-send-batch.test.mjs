@@ -31,10 +31,10 @@ test('envio em lote é sequencial, só usa selecionados e nunca autoriza reinclu
       return { status: 'success', message: 'Pedido criado e Mini Envios selecionado' };
     }, onStart() {}, onResult(id, result) { results.push([id, result]); }, shouldStop: () => false,
   });
-  assert.deepEqual(calls, ['one', 'lost']);
+  assert.deepEqual(calls, ['one', 'lost', 'last']);
   assert.equal(results[1][1].status, 'warning');
   assert.match(results[1][1].message, /Atualizar Omie/);
-  assert.equal(results.length, 2);
+  assert.equal(results.length, 3);
 });
 
 test('interrompe somente depois do pedido atual e bloqueia lotes fora do limite', async () => {
@@ -46,16 +46,26 @@ test('interrompe somente depois do pedido atual e bloqueia lotes fora do limite'
   for (const ids of [[], Array.from({ length: 101 }, (_, i) => String(i))]) await assert.rejects(batch.runOrderSendBatch(ids, options));
 });
 
-test('erro ou pendência interrompe o lote antes dos restantes, sem nova tentativa', async () => {
+test('erro ou pendência fica no pedido e o lote continua, sem nova tentativa', async () => {
   for (const status of ['error', 'warning']) {
     const calls = [], results = [];
     await batch.runOrderSendBatch(['one', 'two', 'three'], {
       async send(id) { calls.push(id); return { status, message: 'Omie indisponível' }; },
       onStart() {}, onResult(id, result) { results.push([id, result]); }, shouldStop: () => false,
     });
-    assert.deepEqual(calls, ['one']);
-    assert.equal(results.length, 1);
+    assert.deepEqual(calls, ['one', 'two', 'three']);
+    assert.equal(results.length, 3);
   }
+});
+
+test('bloqueio geral aguarda antes do próximo envio sem repetir o pedido recusado', async () => {
+  let now = 1000;
+  const calls = [];
+  await batch.runOrderSendBatch(['first', 'next'], {
+    now: () => now, wait: async ms => { now += ms; }, shouldStop: () => false, onStart() {}, onResult() {},
+    async send(id) { calls.push([id, now]); return id === 'first' ? { status: 'error', message: 'Limite de consumo', retryAt: 62000 } : { status: 'success', message: 'Criado' }; },
+  });
+  assert.deepEqual(calls, [['first', 1000], ['next', 62000]]);
 });
 
 test('seleção só admite preparados sem ID Omie; tentativas pendentes e pedidos avançados ficam fora do lote', () => {

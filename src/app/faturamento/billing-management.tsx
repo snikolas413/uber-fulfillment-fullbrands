@@ -40,6 +40,7 @@ export function BillingManagement({ rows, canBill, list }: { rows: BillingRow[];
   const [results, setResults] = useState<Record<string, Result>>({});
   const [running, setRunning] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [waitingUntil, setWaitingUntil] = useState<number | null>(null);
   const [batchIds, setBatchIds] = useState<string[]>([]);
   const runningRef = useRef(false);
   const stopRef = useRef(false);
@@ -64,11 +65,13 @@ export function BillingManagement({ rows, canBill, list }: { rows: BillingRow[];
     const processed = new Set<string>();
     try {
       await runBillingBatch(ids, {
-        invoice: id => invoiceOrderAction(id, true), onStart: setActiveId, shouldStop: () => stopRef.current,
+        invoice: id => invoiceOrderAction(id, true),
+        onStart(id) { setWaitingUntil(null); setActiveId(id); }, shouldStop: () => stopRef.current,
+        onWait(at) { setActiveId(null); setWaitingUntil(at); },
         onResult: (id, result) => { processed.add(id); setResults(previous => ({ ...previous, [id]: result })); },
       });
     } finally {
-      setActiveId(null); setRunning(false); runningRef.current = false;
+      setActiveId(null); setWaitingUntil(null); setRunning(false); runningRef.current = false;
       setSelected(previous => new Set([...previous].filter(id => !processed.has(id))));
       router.refresh();
     }
@@ -89,6 +92,7 @@ export function BillingManagement({ rows, canBill, list }: { rows: BillingRow[];
     {total > 0 && <div className="billing-progress" role="status" aria-live="polite">
       <strong>{running ? "Processando" : "Lote encerrado"}: {completed} de {total} pedido(s)</strong>
       <span>{confirmed} confirmado(s) no Omie · {completed - confirmed} com aviso ou pendência</span>
+      {waitingUntil && <small>Aguardando liberação da API até {new Date(waitingUntil).toLocaleTimeString("pt-BR")}. O lote seguirá para o próximo pedido.</small>}
       {running && <small>Mantenha esta página aberta. O lote é processado um pedido por vez.</small>}
     </div>}
     {rows.length ? <div className="orders-table-wrap"><table className="orders-table billing-table">

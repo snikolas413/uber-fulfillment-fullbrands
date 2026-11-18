@@ -299,7 +299,9 @@ test('cadastro Correios ausente, inativo ou ambíguo bloqueia a criação antes 
     const { actions, calls, writes } = actionsStub({ carriers });
     assert.equal((await actions.sendOrderToOmieAction(id)).status, 'error');
     assert.ok(!calls.some(call => call.method === 'IncluirPedido'));
-    assert.equal(writes.length, 0);
+    assert.equal(writes.length, 1);
+    assert.deepEqual(Object.keys(writes[0]), ['omie_last_error']);
+    assert.match(writes[0].omie_last_error, /^Envio: /);
   }
 });
 

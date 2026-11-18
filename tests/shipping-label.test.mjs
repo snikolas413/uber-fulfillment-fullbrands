@@ -82,6 +82,17 @@ test('concorrência e timeout não repetem a geração; recusa explícita permit
   assert.equal(rejected.state, 'none');
 });
 
+test('falha de geração preserva motivo e prazo da API para o próximo pedido do lote', async () => {
+  const saved = store();
+  const upstream = Object.assign(new Error('Frete indisponível'), { retryAt: 62000 });
+  await assert.rejects(generation.getLabelSources(async () => { throw upstream; }, 123, saved), error => {
+    assert.match(error.message, /Frete indisponível/);
+    assert.equal(error.retryAt, 62000);
+    return true;
+  });
+  assert.equal(saved.state, 'unknown');
+});
+
 test('downloads só aceitam PDFs de hosts autorizados, verificando redirecionamento, tamanho e conteúdo', async () => {
   for (const url of ['http://cdn.omie.com.br/x', 'https://127.0.0.1/x', 'https://omie.com.br.evil.test/x', 'https://user:pass@cdn.omie.com.br/x', 'https://cdn.omie.com.br:444/x']) assert.throws(() => download.assertLabelUrl(url));
   const originalFetch = globalThis.fetch;
@@ -145,10 +156,42 @@ test('geração exige confirmação, sessão e perfil de operação antes de con
   }
 });
 
+test('falha fiscal salva aviso no pedido e auditoria, devolvendo a pausa sem gerar etiqueta', async () => {
+  const patches = [], audits = [], refreshes = [];
+  const id = '11111111-1111-4111-8111-111111111111';
+  const db = {
+    auth: { getUser: async () => ({ data: { user: { id: 'operator' } } }) },
+    from(table) {
+      const q = { select() { return q; }, eq() { return q; },
+        async maybeSingle() { return { data: table === 'user_profiles' ? { role: 'operador', is_active: true } : { id, status: 'billed', omie_order_id: 1 } }; },
+        update(patch) { assert.equal(table, 'shipments'); patches.push(patch); return q; },
+        async insert(audit) { assert.equal(table, 'audit_logs'); audits.push(audit); return { error: null }; },
+        then(resolve) { return Promise.resolve({ error: null }).then(resolve); },
+      }; return q;
+    },
+  };
+  const actions = load('../src/app/expedicao/label-actions.ts', {
+    'next/cache': { revalidatePath: path => refreshes.push(path) }, '@/lib/supabase/server': { createSupabaseServerClient: async () => db },
+    '@/lib/omie/client': { callOmie() { assert.fail('Não deve gerar etiqueta'); } },
+    '@/lib/omie/shipping-invoice': { readShippingInvoice: async () => { throw Object.assign(new Error('Omie temporariamente indisponível'), { retryAt: 62000 }); } },
+    '@/lib/omie/label-download': download, '@/lib/omie/shipping-label-pdf': pdf,
+    '@/lib/omie/generate-shipping-label': generation, '@/lib/omie/freight-selection': { isMiniEnviosName: () => true },
+  });
+  const result = await actions.generateShippingLabelAction(id, true);
+  assert.equal(result.status, 'error');
+  assert.equal(result.retryAt, 62000);
+  assert.equal(patches[0].label_last_error, result.message);
+  assert.ok(patches[0].label_error_at);
+  assert.equal(audits[0].action, 'shipping.label_failed');
+  assert.equal(audits[0].entity_id, id);
+  assert.equal(audits[0].after_summary.message, result.message);
+  assert.deepEqual(refreshes, ['/expedicao']);
+});
+
 test('fluxo completo salva original e PDF combinado, confirma NF local e reimprime sem nova geração', async () => {
   const id = '11111111-1111-4111-8111-111111111111';
   const row = { id, status: 'billing_pending', omie_order_id: 1 };
-  const shipment = { label_generation_state: 'none', label_source_urls: null, label_invoice_key: null, label_storage_path: null, package_count: 1, service_code: '04227', carrier_id: '2757271756' };
+  const shipment = { label_generation_state: 'none', label_source_urls: null, label_invoice_key: null, label_storage_path: null, package_count: 1, service_code: '04227', carrier_id: '2757271756', label_last_error: 'Erro anterior', label_error_at: '2026-11-11' };
   const savedInvoice = {};
   const blobs = new Map();
   const operations = [];
@@ -188,6 +231,7 @@ test('fluxo completo salva original e PDF combinado, confirma NF local e reimpri
   assert.equal(first.status, 'success', first.message);
   assert.equal(first.url, `/api/expedicao/${id}/etiqueta`);
   assert.equal(shipment.label_generation_state, 'ready'); assert.equal(row.status, 'label_ready');
+  assert.equal(shipment.label_last_error, null); assert.equal(shipment.label_error_at, null);
   assert.equal(savedInvoice.access_key, key); assert.equal(savedInvoice.status, '006');
   assert.equal(blobs.size, 2);
   assert.equal((await actions.generateShippingLabelAction(id, true)).status, 'success');

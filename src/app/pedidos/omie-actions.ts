@@ -10,7 +10,7 @@ import { ORDER_REFERENCE as reference } from "@/lib/omie/order-reference";
 import { DELIVERY_INVOICE_NOTE } from "@/lib/omie/invoice-notes";
 import { initialPaymentSchedule, PAYMENT_TERMS_CODE } from "@/lib/omie/payment-policy";
 
-export type OmieActionResult = { status: "success" | "error" | "warning"; message: string };
+export type OmieActionResult = { status: "success" | "error" | "warning"; message: string; retryAt?: number };
 type Recipient = { full_name: string; document_number: string | null; email: string | null; phone: string | null };
 type Address = { street: string; number: string; complement: string | null; district: string; city: string; state: string; postal_code: string; validation_status: string };
 type Item = { omie_product_id: number; product_code: string; description: string; ncm: string | null; cfop: string | null; unit: string; quantity: number; unit_price: number };
@@ -56,7 +56,22 @@ function parseOmieDate(value: string | null | undefined): string | null {
 }
 function errorMessage(error: unknown) {
   if (error instanceof OmieConfigurationError || error instanceof OmieApiError || error instanceof FreightSelectionError || error instanceof ItemIcmsError) return error.message;
-  return "Falha de comunicação com o Omie. Consulte o status antes de tentar novamente.";
+  return error instanceof Error ? error.message : "Falha de comunicação com o Omie. Consulte o status antes de tentar novamente.";
+}
+function retryMetadata(error: unknown): { retryAt?: number } {
+  const value = (error as { retryAt?: unknown } | null)?.retryAt;
+  return typeof value === "number" && Number.isFinite(value) ? { retryAt: value } : {};
+}
+function failureReporter({ supabase, userId }: Awaited<ReturnType<typeof context>>, id: string, operation: string) {
+  return async (error: unknown) => {
+    const message = errorMessage(error).slice(0, 500);
+    try {
+      const { error: saveError } = await supabase.from("fulfillments").update({ omie_last_error: (operation + ": " + message).slice(0, 500) }).eq("id", id);
+      await audit(supabase, userId, id, "omie.operation.failed", { operation, message, ...retryMetadata(error) });
+      if (saveError) console.error("Não foi possível salvar o aviso do pedido.");
+      revalidatePath("/pedidos"); revalidatePath("/faturamento"); revalidatePath("/expedicao");
+    } catch { console.error("Não foi possível registrar o erro do pedido."); }
+  };
 }
 function isNotFound(error: unknown) {
   const message = error instanceof Error ? error.message.toLocaleLowerCase("pt-BR") : "";
@@ -260,24 +275,30 @@ async function applyMiniEnviosFreight(supabase: Awaited<ReturnType<typeof create
     }).catch(() => console.error("Não foi possível registrar a pendência de seleção de frete na auditoria."));
     const message = errorMessage(error) + " O pedido permanece criado; não reenvie a inclusão do pedido.";
     await persistMessage(message);
-    return { status: "warning", message };
+    return { status: "warning", message, ...retryMetadata(error) };
   }
 }
 
 export async function selectMiniEnviosFreightAction(id: string): Promise<OmieActionResult> {
+  let reportFailure: ((error: unknown) => Promise<void>) | undefined;
   try {
     const { supabase, userId } = await context();
-    return await applyMiniEnviosFreight(supabase, userId, await load(supabase, id));
+    const row = await load(supabase, id);
+    reportFailure = failureReporter({ supabase, userId }, row.id, "Frete");
+    return await applyMiniEnviosFreight(supabase, userId, row);
   } catch (error) {
-    return { status: "error", message: errorMessage(error) };
+    await reportFailure?.(error);
+    return { status: "error", message: errorMessage(error), ...retryMetadata(error) };
   }
 }
 
 export async function sendOrderToOmieAction(id: string, confirmRetry = false): Promise<OmieActionResult> {
   let releaseLock: (() => Promise<void>) | null = null;
+  let reportFailure: ((error: unknown) => Promise<void>) | undefined;
   try {
     const { supabase, userId } = await context();
     let row = await load(supabase, id);
+    reportFailure = failureReporter({ supabase, userId }, row.id, "Envio");
     if (row.omie_send_started_at && Date.parse(row.omie_send_started_at) > Date.now() - 15 * 60_000) {
       return { status: "warning", message: "Já existe um envio em andamento para este pedido. Aguarde antes de tentar novamente." };
     }
@@ -298,7 +319,8 @@ export async function sendOrderToOmieAction(id: string, confirmRetry = false): P
         }
       } catch (error) {
         if (!isNotFound(error)) {
-          return { status: "error", message: "Não foi possível confirmar se o pedido já existe no Omie. Não será feita nova inclusão para evitar duplicidade. " + errorMessage(error) };
+          await reportFailure(error);
+          return { status: "error", ...retryMetadata(error), message: "Não foi possível confirmar se o pedido já existe no Omie. Não será feita nova inclusão para evitar duplicidade. " + errorMessage(error) };
         }
       }
       if (!confirmRetry) return {
@@ -340,19 +362,23 @@ export async function sendOrderToOmieAction(id: string, confirmRetry = false): P
       await supabase.from("fulfillments").update({
         status: "order_pending", omie_last_error: message.slice(0, 500),
       }).eq("id", row.id);
-      return { status: "error", message: message + " O pedido ficou pendente de reconciliação; não repita o envio sem consultar o Omie." };
+      await reportFailure(error);
+      return { status: "error", ...retryMetadata(error), message: message + " O pedido ficou pendente de reconciliação; não repita o envio sem consultar o Omie." };
     }
   } catch (error) {
-    return { status: "error", message: errorMessage(error) };
+    await reportFailure?.(error);
+    return { status: "error", message: errorMessage(error), ...retryMetadata(error) };
   } finally {
     if (releaseLock) await releaseLock().catch(() => console.error("Falha ao liberar reserva de envio."));
   }
 }
 
 export async function syncOmieOrderAction(id: string): Promise<OmieActionResult> {
+  let reportFailure: ((error: unknown) => Promise<void>) | undefined;
   try {
     const { supabase, userId } = await context();
     const row = await load(supabase, id);
+    reportFailure = failureReporter({ supabase, userId }, row.id, "Sincronização do pedido");
     if (!row.omie_order_id && !["order_pending", "order_created", "billing_pending", "billed", "shipping_pending", "label_ready", "shipped"].includes(row.status)) {
       return { status: "error", message: "O pedido ainda não possui referência de integração com o Omie." };
     }
@@ -360,16 +386,19 @@ export async function syncOmieOrderAction(id: string): Promise<OmieActionResult>
     if (!hasOmieOrder(status)) return { status: "warning", message: "O Omie não retornou esse pedido. Confira o ERP antes de reenviar." };
     return await reconcile(supabase, userId, row, status);
   } catch (error) {
-    return { status: "error", message: errorMessage(error) };
+    await reportFailure?.(error);
+    return { status: "error", message: errorMessage(error), ...retryMetadata(error) };
   }
 }
 
 export async function invoiceOrderAction(id: string, confirmed = false): Promise<OmieActionResult & { billingOutcome?: BillingOutcome }> {
+  let reportFailure: ((error: unknown) => Promise<void>) | undefined;
   try {
     if (!confirmed) return { status: "error", message: "Confirme os pedidos selecionados antes de solicitar o faturamento." };
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return { status: "error", message: "Pedido inválido." };
     const { supabase, userId } = await context();
     const row = await load(supabase, id);
+    reportFailure = failureReporter({ supabase, userId }, row.id, "Faturamento");
     if (!row.omie_order_id || !row.omie_order_number || !["order_created", "billing_pending", "billed"].includes(row.status)) return { status: "error", message: "O pedido precisa estar criado no Omie para ser faturado." };
     if (row.omie_last_error?.startsWith("Frete: ")) return { status: "warning", message: "Resolva a pendência de frete deste pedido antes de faturar." };
     const { data: shipment, error: shipmentError } = await supabase.from("shipments").select("carrier_id,service_code,freight_amount").eq("fulfillment_id", id).maybeSingle();
@@ -401,19 +430,22 @@ export async function invoiceOrderAction(id: string, confirmed = false): Promise
       try { await reconcile(supabase, userId, row, result.snapshot); }
       catch { message += " Não foi possível atualizar a cópia local. Consulte o Omie antes de repetir."; status = "warning"; }
     }
-    await audit(supabase, userId, id, "omie.invoice.result", { omie_order_id: row.omie_order_id, outcome: result.outcome, required_invoice_note: DELIVERY_INVOICE_NOTE, tax_scenario_refresh_requested: Boolean(result.taxScenarioRefreshRequested), message: message.slice(0, 500) });
+    await audit(supabase, userId, id, "omie.invoice.result", { omie_order_id: row.omie_order_id, outcome: result.outcome, ...retryMetadata(result), required_invoice_note: DELIVERY_INVOICE_NOTE, tax_scenario_refresh_requested: Boolean(result.taxScenarioRefreshRequested), message: message.slice(0, 500) });
     await supabase.from("fulfillments").update({ omie_last_error: status === "success" ? null : ("Faturamento: " + message).slice(0, 500) }).eq("id", id);
     revalidatePath("/faturamento"); revalidatePath("/pedidos");
-    return { status, message, billingOutcome: result.outcome };
+    return { status, message, billingOutcome: result.outcome, ...retryMetadata(result) };
   } catch (error) {
-    return { status: "error", message: errorMessage(error) };
+    await reportFailure?.(error);
+    return { status: "error", message: errorMessage(error), ...retryMetadata(error) };
   }
 }
 
 export async function syncOmieShippingAction(id: string): Promise<OmieActionResult> {
+  let reportFailure: ((error: unknown) => Promise<void>) | undefined;
   try {
     const { supabase, userId } = await context();
     const row = await load(supabase, id);
+    reportFailure = failureReporter({ supabase, userId }, row.id, "Sincronização do frete");
     if (!row.omie_order_id) return { status: "error", message: "O pedido ainda não possui número interno Omie." };
     const response = await callOmie<OmiePedido>("/produtos/pedido/", "ConsultarPedido", { codigo_pedido: row.omie_order_id });
     const freight = response.pedido_venda_produto?.frete;
@@ -450,6 +482,7 @@ export async function syncOmieShippingAction(id: string): Promise<OmieActionResu
       ? { status: "success", message: "Rastreio e frete atualizados a partir do Omie. A etiqueta pode ser preparada na tela Expedição." }
       : { status: "success", message: "Frete sincronizado do Omie. O código de rastreio ainda não foi registrado no ERP." };
   } catch (error) {
-    return { status: "error", message: errorMessage(error) };
+    await reportFailure?.(error);
+    return { status: "error", message: errorMessage(error), ...retryMetadata(error) };
   }
 }

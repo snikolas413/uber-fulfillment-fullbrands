@@ -142,7 +142,7 @@ export async function selectMiniEnviosFreight(request: Request, orderId: number,
   try {
     selection = await request<{ cCodStatus?: string; cDesStatus?: string }>("/produtos/frete/", "SelecionarFrete", { nIdFrete: quote.nIdFrete, lGratis: true });
   } catch (error) {
-    throw new FreightSelectionError("O resultado da seleção de Mini Envios não foi confirmado. Confira a opção salva no Omie antes de tentar novamente. " + (error instanceof Error ? error.message : ""), "unknown");
+    throw Object.assign(new FreightSelectionError("O resultado da seleção de Mini Envios não foi confirmado. Confira a opção salva no Omie antes de tentar novamente. " + (error instanceof Error ? error.message : ""), "unknown"), { retryAt: (error as { retryAt?: number } | null)?.retryAt });
   }
   checkResponse(selection);
   if (createdCarrierId) {
@@ -161,6 +161,6 @@ export async function selectMiniEnviosFreight(request: Request, orderId: number,
     }
     return { quote, carrierId, freight: saved.frete, freeForCustomer: true as const, confirmation: "verified" as const };
   } catch (error) {
-    throw new FreightSelectionError("O Omie aceitou a seleção de Mini Envios, mas a conferência do pedido com frete grátis não foi concluída. Confira o pedido no ERP antes de repetir a operação. " + (error instanceof Error ? error.message : ""), "selected");
+    throw Object.assign(new FreightSelectionError("O Omie aceitou a seleção de Mini Envios, mas a conferência do pedido com frete grátis não foi concluída. Confira o pedido no ERP antes de repetir a operação. " + (error instanceof Error ? error.message : ""), "selected"), { retryAt: (error as { retryAt?: number } | null)?.retryAt });
   }
 }

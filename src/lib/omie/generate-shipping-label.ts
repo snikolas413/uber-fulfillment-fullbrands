@@ -16,9 +16,12 @@ export async function getLabelSources(request: Request, orderId: number, store: 
   if (store.state !== "none" || !await store.claim()) throw new Error("A geração desta etiqueta já está em andamento ou sem confirmação. Confira a etiqueta no painel de fretes do Omie antes de qualquer nova solicitação.");
   let response;
   try { response = await request<{ cCodStatus?: string; cDesStatus?: string; listaEtiqueta?: { cUrlEtiqueta?: string }[] }>("/produtos/frete/", "GerarEtiqueta", { nIdPedido: orderId }); }
-  catch {
+  catch (error) {
     await store.markUnknown();
-    throw new Error("O Omie não confirmou a geração da etiqueta. Não será feita nova solicitação automática. Confira o painel de fretes do pedido.");
+    const reason = error instanceof Error ? " " + error.message : "";
+    const retryAt = (error as { retryAt?: unknown } | null)?.retryAt;
+    throw Object.assign(new Error("O Omie não confirmou a geração da etiqueta. Não será feita nova solicitação automática. Confira o painel de fretes do pedido." + reason),
+      { retryAt: typeof retryAt === "number" && Number.isFinite(retryAt) ? retryAt : undefined });
   }
   if (response.cCodStatus != null && String(response.cCodStatus) !== "0") {
     await store.markRejected();

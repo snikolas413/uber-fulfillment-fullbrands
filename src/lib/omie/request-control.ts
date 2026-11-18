@@ -12,12 +12,19 @@ export class OmieRequestPausedError extends Error {
 }
 
 export function pauseSeconds(error: unknown) {
-  const details = error as { httpStatus?: number; retryAfterSeconds?: number; code?: string; message?: string } | null;
+  const details = error as { httpStatus?: number; retryAfterSeconds?: number; code?: string; message?: string; name?: string } | null;
   const message = (details?.code ?? "") + " " + (details?.message ?? "");
   const upstream = details?.retryAfterSeconds ?? 0;
   const seconds = Number(/aguarde\s+(\d+)\s+segundos?/i.exec(message)?.[1] ?? 0);
   const minutes = Number(/(?:aguarde|bloquead[oa].*?)\s*(\d+)\s+minutos?/i.exec(message)?.[1] ?? 0);
   const blocked = details?.httpStatus === 425 || /(?:^|\W)425(?:\W|$)|consumo indevido|api bloqueada|temporariamente bloquead|api.*blocked/i.test(message);
+  // REDUNDANT and business refusals concern this request/order, not the company API.
+  if (!blocked && /redundant|redundante/i.test(message)) return 0;
+  const status = details?.httpStatus ?? 0;
+  // Omie documents HTTP 500 as business/parameter validation, unlike 503.
+  const unavailable = [401, 403, 406, 408, 429].includes(status) || status > 500 ||
+    error instanceof TypeError || ["AbortError", "TimeoutError"].includes(details?.name ?? "");
+  if (!blocked && !unavailable && upstream <= 0) return 0;
   return Math.min(86_400, Math.max(blocked ? 1_800 : 61, upstream, seconds + 1, minutes * 60 + 1));
 }
 
@@ -58,11 +65,18 @@ export function createOmieRequestControl({ acquire, finish, now = Date.now, wait
         result = await request();
       } catch (error) {
         const seconds = pauseSeconds(error);
-        pausedUntil = now() + seconds * 1000;
-        cache.clear();
+        if (seconds > 0) { pausedUntil = now() + seconds * 1000; cache.clear(); }
+        // A failed request is never replayed. A redundant read only delays the
+        // same request key; another order can proceed immediately.
+        const message = error instanceof Error ? error.message : "";
+        if (/redundant|redundante/i.test(message + " " + (error as { code?: string } | null)?.code)) {
+          const seconds = Number(/aguarde\s+(\d+)\s+segundos?/i.exec(message)?.[1] ?? 60);
+          reads.set(key, now() + Math.max(61, seconds + 1) * 1000); trim(reads);
+        }
         try { await finish(reservation.lease, seconds); }
-        catch { pausedUntil = Math.max(pausedUntil, now() + 120_000); }
-        throw new OmieRequestPausedError(pausedUntil, error instanceof Error ? error.message : "Falha na comunicação com o Omie.");
+        catch { pausedUntil = Math.max(pausedUntil, now() + 120_000); throw new OmieRequestPausedError(pausedUntil, message); }
+        if (seconds > 0) throw new OmieRequestPausedError(pausedUntil, message || "Falha na comunicação com o Omie.");
+        throw error;
       }
       try { await finish(reservation.lease, 0); }
       catch {

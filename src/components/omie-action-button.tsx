@@ -89,7 +89,7 @@ export function OmieActionButton({
           break;
       }
       setResult(response);
-      if (response.status === "success" || response.status === "warning") router.refresh();
+      router.refresh();
     });
   }
 

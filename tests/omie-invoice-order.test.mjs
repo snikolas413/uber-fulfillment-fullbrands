@@ -102,6 +102,26 @@ test('não muda etapa já preparada nem reemite pedido já faturado', async () =
   assert.deepEqual(billed.calls.map(call => call.method), ['ConsultarPedido', 'StatusPedido']);
 });
 
+test('erro em cada etapa encerra só aquele pedido, preserva prazo e não faz as chamadas restantes', async () => {
+  for (const failed of ['ConsultarPedido', 'AlterarPedidoVenda', 'TrocarEtapaPedido', 'StatusPedido', 'ValidarPedidoVenda', 'FaturarPedidoVenda']) {
+    const scenario = omie({ notes: 'Observação existente' });
+    const calls = [];
+    const original = scenario.args.request;
+    scenario.args.request = async (endpoint, method, params) => {
+      calls.push(method);
+      if (method === failed) throw Object.assign(new Error('Falha em ' + method), { retryAt: 62000 });
+      return original(endpoint, method, params);
+    };
+    const result = await billing.invoiceExistingOrder(scenario.args);
+    assert.equal(result.outcome, failed === 'FaturarPedidoVenda' ? 'unknown' : 'rejected');
+    assert.equal(result.retryAt, 62000);
+    assert.equal(calls.at(-1), failed);
+    assert.equal(calls.filter(method => method === failed).length, 1);
+    assert.match(result.message, new RegExp(failed));
+    assert.equal((await billing.invoiceExistingOrder(omie().args)).outcome, 'confirmed');
+  }
+});
+
 test('pedidos antigos recebem a frase antes de faturar, com releitura e preservação das observações', async () => {
   for (const notes of ['', 'Observação anterior|Entrega a consumidor final']) {
     const { args, calls } = omie({ notes });

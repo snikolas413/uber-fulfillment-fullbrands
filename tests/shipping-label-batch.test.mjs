@@ -49,6 +49,34 @@ test('interrupção conclui o atual; tentativas incertas não são elegíveis e 
   for (const selection of [[], Array.from({ length: 101 }, (_, i) => String(i))]) await assert.rejects(batch.runShippingLabelBatch(selection, options));
 });
 
+test('erro de API aguarda liberação e processa o próximo, sem repetir a etiqueta que falhou', async () => {
+  let now = 1000;
+  const calls = [], results = [], waits = [];
+  const ready = await batch.runShippingLabelBatch(['failed', 'next', 'last'], {
+    now: () => now, wait: async ms => { now += ms; }, onWait: at => waits.push(at),
+    shouldStop: () => false, onStart() {}, onResult: (id, result) => results.push([id, result]),
+    async generate(id) {
+      calls.push([id, now]);
+      return id === 'failed' ? { status: 'error', message: 'API indisponível', retryAt: 62000 }
+        : { status: 'success', message: 'Pronta', url: '/' + id };
+    },
+  });
+  assert.deepEqual(calls, [['failed', 1000], ['next', 62000], ['last', 62000]]);
+  assert.deepEqual(ready, ['next', 'last']);
+  assert.deepEqual(waits, [62000]);
+  assert.equal(results.length, 3);
+});
+
+test('operador pode parar durante a espera da proteção da API', async () => {
+  let now = 1000, stop = false;
+  const calls = [];
+  await batch.runShippingLabelBatch(['failed', 'next'], {
+    now: () => now, wait: async ms => { now += ms; stop = true; }, shouldStop: () => stop,
+    onStart() {}, onResult() {}, async generate(id) { calls.push(id); return { status: 'error', message: 'Pausa', retryAt: 62000 }; },
+  });
+  assert.deepEqual(calls, ['failed']);
+});
+
 async function demoLabel(number, volumes) {
   const source = await pdfLib.PDFDocument.create();
   for (let i = 0; i < volumes; i++) {
@@ -104,10 +132,11 @@ test('tela oferece seleção para operação, bloqueia etiqueta incerta e não g
     './label-actions': { generateShippingLabelAction() { assert.fail('Renderização não pode gerar etiqueta'); } },
     '@/lib/omie/shipping-label-batch': batch,
   });
-  const rows = ['none', 'ready', 'unknown'].map((state, i) => ({ id: String(i), status: 'billed', created_at: '2026-11-11', recipients: { full_name: `Pessoa ${i}` }, shipments: { label_generation_state: state, label_storage_path: state === 'ready' ? '/saved.pdf' : null }, invoices: null }));
+  const rows = ['none', 'ready', 'unknown'].map((state, i) => ({ id: String(i), status: 'billed', created_at: '2026-11-11', recipients: { full_name: `Pessoa ${i}` }, shipments: { label_generation_state: state, label_storage_path: state === 'ready' ? '/saved.pdf' : null, label_last_error: i === 2 ? 'Omie não confirmou a geração' : null }, invoices: null }));
   const render = canGenerate => renderToStaticMarkup(React.createElement(ShippingManagement, { rows, canGenerate, loadError: false }));
   const html = render(true);
   assert.match(html, /Preparar etiquetas selecionadas/);
   assert.match(html, /aria-label="Selecionar envio de Pessoa 2"[^>]*disabled/);
+  assert.match(html, /Erro na etiqueta: Omie não confirmou a geração/);
   assert.ok(!render(false).includes('type="checkbox"'));
 });

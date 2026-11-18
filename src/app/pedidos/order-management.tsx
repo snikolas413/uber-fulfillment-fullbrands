@@ -142,9 +142,10 @@ export function OrderManagement({
     try {
       await runOrderSendBatch(ids, {
         send: sendOrderToOmieAction, shouldStop: () => stopRef.current,
-        onStart: setActiveId,
+        onStart(id) { setActiveId(id); setBatchNotice(""); },
+        onWait(at) { setActiveId(null); setBatchNotice("Aguardando liberação da API até " + new Date(at).toLocaleTimeString("pt-BR") + ". O lote seguirá para o próximo pedido."); },
         onResult(id, result) {
-          if (result.status !== "success") setBatchNotice("Lote interrompido na primeira pendência. Os pedidos restantes não foram enviados. Confira o resultado antes de iniciar outro lote.");
+          if (result.status !== "success") setBatchNotice("O aviso foi registrado no pedido. O lote continua para o próximo, sem repetir o pedido com falha.");
           setSendResults(current => ({ ...current, [id]: result }));
           setSelected(current => current.filter(value => value !== id));
           setBatchDone(current => current + 1);

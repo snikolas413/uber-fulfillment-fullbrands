@@ -23,7 +23,7 @@ type BillingOrder = Omit<PaymentOrder, "cabecalho" | "det"> & {
   frete?: { codigo_transportadora?: number; valor_frete?: number; valor_seguro?: number; outras_despesas?: number };
   det?: BillingItem[];
 };
-type BillingResult = { outcome: BillingOutcome; message: string; snapshot?: BillingStatus; taxScenarioRefreshRequested?: boolean };
+type BillingResult = { outcome: BillingOutcome; message: string; snapshot?: BillingStatus; taxScenarioRefreshRequested?: boolean; retryAt?: number };
 const isBilled = (status: BillingStatus) => status.faturada === "S" || Boolean(status.ListaNfe?.some(nfe => nfe.numero_nfe || nfe.chave_nfe));
 const hasIcmsSituation = (item: BillingItem) => hasCompleteItemIcms(item.imposto, item.ide?.simples_nacional === "S");
 
@@ -155,12 +155,14 @@ export async function invoiceExistingOrder({ request, orderId, integrationCode, 
       : { outcome: "submitted", message: "O Omie aceitou o faturamento; a confirmação da NF-e está pendente. Use Atualizar Omie, sem reenviar a emissão.", snapshot, taxScenarioRefreshRequested };
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Falha na comunicação com o Omie.";
+    const retryAt = (error as { retryAt?: number } | null)?.retryAt;
+    const retry = typeof retryAt === "number" && Number.isFinite(retryAt) ? { retryAt } : {};
     const state = accepted ? "billing_submitted" : requested ? "billing_unknown" : "billing_rejected";
     if (claimed) {
       try { await settle(state); }
-      catch { return { outcome: "blocked", message: "Não foi possível salvar o resultado local do faturamento. Confira o pedido no Omie e sincronize antes de qualquer nova tentativa." }; }
+      catch { return { outcome: "blocked", ...retry, message: "Não foi possível salvar o resultado local do faturamento. Confira o pedido no Omie e sincronize antes de qualquer nova tentativa." }; }
     }
-    return { outcome: accepted ? "submitted" : requested ? "unknown" : "rejected", taxScenarioRefreshRequested, message: requested
+    return { outcome: accepted ? "submitted" : requested ? "unknown" : "rejected", ...retry, taxScenarioRefreshRequested, message: requested
       ? (accepted ? "O Omie aceitou a solicitação, mas a conferência não foi concluída. " : "O resultado do faturamento não foi confirmado. ") + reason + " Use Atualizar Omie; não reenvie a emissão."
       : reason };
   }

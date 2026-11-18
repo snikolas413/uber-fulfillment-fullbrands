@@ -70,6 +70,18 @@ async function loadLinkedOrder(supabase: Awaited<ReturnType<typeof createSupabas
   return data;
 }
 
+function shippingFailureReporter({ supabase, userId }: Awaited<ReturnType<typeof authorizedContext>>, id: string) {
+  return async (error: unknown) => {
+    const message = error instanceof Error ? error.message.slice(0, 500) : "Falha ao consultar ou atualizar o frete.";
+    try {
+      await supabase.from("fulfillments").update({ omie_last_error: ("Expedição: " + message).slice(0, 500) }).eq("id", id);
+      await supabase.from("audit_logs").insert({ actor_id: userId, entity_type: "fulfillment", entity_id: id,
+        action: "omie.shipping.failed", source: "application", after_summary: { message } });
+      revalidatePath("/expedicao"); revalidatePath("/pedidos");
+    } catch { console.error("Não foi possível registrar o erro da operação logística."); }
+  };
+}
+
 async function readOmieOrder(orderId: number): Promise<NonNullable<OmieOrderResponse["pedido_venda_produto"]>> {
   const response = await callOmie<OmieOrderResponse>(
     "/produtos/pedido/",
@@ -106,9 +118,11 @@ function validateInput(input: ShippingInput) {
 }
 
 export async function previewOmieShippingAction(id: string): Promise<ActionResult> {
+  let reportFailure: ((error: unknown) => Promise<void>) | undefined;
   try {
-    const { supabase } = await authorizedContext();
+    const { supabase, userId } = await authorizedContext();
     const row = await loadLinkedOrder(supabase, id);
+    reportFailure = shippingFailureReporter({ supabase, userId }, row.id);
     const order = await readOmieOrder(row.omie_order_id!);
     const freight = order.frete ?? {};
     return {
@@ -125,6 +139,7 @@ export async function previewOmieShippingAction(id: string): Promise<ActionResul
       },
     };
   } catch (error) {
+    await reportFailure?.(error);
     return { status: "error", message: error instanceof Error ? error.message : "Não foi possível consultar o pedido no Omie." };
   }
 }
@@ -134,12 +149,14 @@ export async function previewOmieShippingAction(id: string): Promise<ActionResul
  * A gravação exige confirmação explícita do usuário e nunca inclui/fatura/envia pedido.
  */
 export async function updateOmieShippingAction(id: string, input: ShippingInput): Promise<ActionResult> {
+  let reportFailure: ((error: unknown) => Promise<void>) | undefined;
   try {
     if (input.confirmed !== true) return { status: "warning", message: "Confirme os dados do frete antes de gravar." };
     validateInput(input);
 
     const { supabase, userId } = await authorizedContext();
     const row = await loadLinkedOrder(supabase, id);
+    reportFailure = shippingFailureReporter({ supabase, userId }, row.id);
     const before = await readOmieOrder(row.omie_order_id!);
     const integrationCode = before.cabecalho?.codigo_pedido_integracao;
     const expectedIntegrationCode = "UFB-" + id.replace(/-/g, "");
@@ -234,6 +251,7 @@ export async function updateOmieShippingAction(id: string, input: ShippingInput)
       },
     };
   } catch (error) {
+    await reportFailure?.(error);
     return { status: "error", message: error instanceof Error ? error.message : "Falha ao atualizar o frete no Omie." };
   }
 }

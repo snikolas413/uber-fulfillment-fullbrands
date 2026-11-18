@@ -35,12 +35,10 @@ export async function resolveItemIcms(request: Request, { scenarioId, customerId
   if (![scenarioId, customerId, productId].every(id => Number.isSafeInteger(id) && id > 0) || !["S", "N"].includes(finalConsumer)) {
     throw new ItemIcmsError("Confirme o cenário, cliente e produto antes de preencher o ICMS do item.");
   }
-  const [scenario, product] = await Promise.all([
-    request<{ codigo_cenario?: number; codigo_cliente_omie?: number; codigo_produto?: number; consumo_final?: string; impostos?: Record<string, unknown> }>("/geral/cenarios/", "ListarImpostosCenario", {
+  const scenario = await request<{ codigo_cenario?: number; codigo_cliente_omie?: number; codigo_produto?: number; consumo_final?: string; impostos?: Record<string, unknown> }>("/geral/cenarios/", "ListarImpostosCenario", {
       codigo_cenario: scenarioId, codigo_cliente_omie: customerId, codigo_produto: productId, consumo_final: finalConsumer,
-    }),
-    request<{ codigo_produto?: number; recomendacoes_fiscais?: { origem_mercadoria?: string } }>("/geral/produtos/", "ConsultarProduto", { codigo_produto: productId }),
-  ]);
+    });
+  const product = await request<{ codigo_produto?: number; recomendacoes_fiscais?: { origem_mercadoria?: string } }>("/geral/produtos/", "ConsultarProduto", { codigo_produto: productId });
   if (scenario.codigo_cenario !== scenarioId || scenario.codigo_cliente_omie !== customerId || scenario.codigo_produto !== productId ||
     scenario.consumo_final !== finalConsumer || product.codigo_produto !== productId || !scenario.impostos) {
     throw new ItemIcmsError("O Omie não confirmou os dados fiscais do cenário e do produto.");

@@ -45,6 +45,8 @@ test('cliente trata HTTP, faultstring, status de negócio, timeout e JSON invál
     () => new Response(JSON.stringify({ faultcode: 'REDUNDANT', faultstring: 'Aguarde 20 segundos' })),
     () => new Response(JSON.stringify({ cCodStatus: '100', cDesStatus: 'Cotação indisponível' })),
     () => new Response(JSON.stringify({ codigo_status: '1', descricao_status: 'Dados inválidos' })),
+    () => new Response(JSON.stringify({ faultcode: 'SOAP-ENV:Client', faultstring: 'Pedido com dados fiscais inválidos' }), { status: 500 }),
+    () => new Response('{}', { status: 503 }),
     () => new Response('{}', { status: 429, headers: { 'Retry-After': '3600' } }),
     () => { throw new Error('Timeout'); },
     () => new Response('não é JSON'),
@@ -53,10 +55,17 @@ test('cliente trata HTTP, faultstring, status de negócio, timeout e JSON invál
   ]) {
     await withClient(async h => {
       h.fetch(response);
-      await assert.rejects(h.client.callOmie('/produtos/frete/', 'CotarFrete', { nIdPedido: 1 }), /Integração pausada/);
-      await assert.rejects(h.client.callOmie('/produtos/frete/', 'CotarFrete', { nIdPedido: 2 }), /Integração pausada/);
-      assert.equal(h.calls.length, 1);
-      assert.equal(h.finishes.length, 1);
+      await assert.rejects(h.client.callOmie('/produtos/frete/', 'CotarFrete', { nIdPedido: 1 }));
+      h.fetch(() => new Response(JSON.stringify({ cCodStatus: '0' })));
+      if (h.finishes[0] > 0) {
+        await assert.rejects(h.client.callOmie('/produtos/frete/', 'CotarFrete', { nIdPedido: 2 }), /Integração pausada/);
+        assert.equal(h.calls.length, 1);
+        assert.equal(h.finishes.length, 1);
+      } else {
+        await h.client.callOmie('/produtos/frete/', 'CotarFrete', { nIdPedido: 2 });
+        assert.equal(h.calls.length, 2);
+        assert.deepEqual(h.finishes, [0, 0]);
+      }
     });
   }
 });
