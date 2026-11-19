@@ -35,7 +35,7 @@ function omie(options = {}) {
       if (orderReads > 1 && options.noteReadError) throw new Error('Consulta indisponível');
       return { pedido_venda_produto: {
       lista_parcelas: { parcela: [{ data_vencimento: options.expiredPayment ? '12/11/2026' : '31/12/2026', nao_gerar_boleto: options.generateBoleto ? 'N' : 'S' }] },
-      cabecalho: { nao_gerar_boleto: 'S', codigo_pedido: options.wrongOrder ? 999 : 555, codigo_pedido_integracao: integrationCode, codigo_cenario_impostos: '777', codigo_cliente: 888, etapa: options.stage ?? '10', bloqueado: options.blocked ? 'S' : 'N' },
+      cabecalho: { nao_gerar_boleto: 'S', codigo_pedido: options.wrongOrder ? 999 : 555, codigo_pedido_integracao: integrationCode, codigo_cenario_impostos: '777', codigo_cliente: 888, etapa: options.stage ?? '20', bloqueado: options.blocked ? 'S' : 'N' },
       infoCadastro: { faturado: options.alreadyBilled || (orderReads > 1 && options.billedDuringUpdate) ? 'S' : 'N', cancelado: options.cancelled ? 'S' : 'N' },
       frete: { codigo_transportadora: options.changedCarrier ? 999 : 123, ...(options.omitFreight ? {} : { valor_frete: options.notFree ? 12 : 0 }) },
       informacoes_adicionais: { consumidor_final: 'S', dados_adicionais_nf:notes, outros_detalhes: { cEstadoOd: 'SC', cEnderecoOd: 'Rua Teste' } },
@@ -75,7 +75,7 @@ function omie(options = {}) {
   };
   const claim = async () => { if (locked || options.claimDenied) return false; locked = true; return true; };
   const settle = async state => { states.push(state); if (state === 'billing_submitting' && options.queuePersistError) throw new Error('Fila indisponível'); };
-  const args = { request, orderId: 555, integrationCode, carrierId: 123, claim, settle };
+  const args = { request, orderId: 555, integrationCode, carrierId: 123, separationStage: options.separationStage ?? "20", claim, settle };
   return { args, calls, states };
 }
 
@@ -100,6 +100,15 @@ test('não muda etapa já preparada nem reemite pedido já faturado', async () =
   const billed = omie({ alreadyBilled: true });
   assert.equal((await billing.invoiceExistingOrder(billed.args)).outcome, 'confirmed');
   assert.deepEqual(billed.calls.map(call => call.method), ['ConsultarPedido', 'StatusPedido']);
+});
+
+test('faturamento recusa etapa anterior à separação ou confirmação inválida sem reservar nem emitir', async () => {
+  for (const options of [{stage:'10'},{stage:'30'},{separationStage:'50'}]) {
+    const h=omie(options);
+    assert.equal((await billing.invoiceExistingOrder(h.args)).outcome,'rejected');
+    assert.deepEqual(h.calls.map(call=>call.method),['ConsultarPedido']);
+    assert.deepEqual(h.states,[]);
+  }
 });
 
 test('erro em cada etapa encerra só aquele pedido, preserva prazo e não faz as chamadas restantes', async () => {
@@ -251,7 +260,7 @@ function actionHarness(options = {}) {
   const upstream = omie(options);
   const invoice = options.invoice ? { id: 'invoice-1', ...options.invoice } : null;
   const records = { invoice, audits: [], writes: [], authReads: 0 };
-  const row = { id, status: 'order_created', omie_order_id: 555, omie_order_number: '1140', omie_last_error: options.freightError ? 'Frete: Pendente' : null };
+  const row = { id, separation_state: options.noSeparation ? 'none' : 'confirmed', separation_confirmed_at: '2026-11-19T12:00:00Z', separation_omie_stage: '20', status: 'order_created', omie_order_id: 555, omie_order_number: '1140', omie_last_error: options.freightError ? 'Frete: Pendente' : null };
   const client = {
     auth: { async getUser() { records.authReads++; return { data: { user: options.loggedOut ? null : { id: 'user' } }, error: null }; } },
     from(table) {
@@ -309,7 +318,7 @@ test('ação exige confirmação, sessão, perfil ativo e frete confirmado no se
   const unconfirmed = actionHarness();
   assert.equal((await unconfirmed.actions.invoiceOrderAction(id)).status, 'error');
   assert.equal(unconfirmed.records.authReads, 0);
-  for (const options of [{ loggedOut: true }, { role: 'consulta' }, { inactive: true }, { noShipment: true }, { freightError: true }]) {
+  for (const options of [{ loggedOut: true }, { role: 'consulta' }, { inactive: true }, { noSeparation: true }, { noShipment: true }, { freightError: true }]) {
     const harness = actionHarness(options);
     assert.notEqual((await harness.actions.invoiceOrderAction(id, true)).status, 'success');
     assert.equal(harness.calls.length, 0);

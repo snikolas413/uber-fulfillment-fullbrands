@@ -59,8 +59,8 @@ async function scenarioRefreshItems(request: Request, order: BillingOrder) {
 }
 
 /** Bills an existing order only after an exclusive durable claim. Never retries issuance. */
-export async function invoiceExistingOrder({ request, orderId, integrationCode, carrierId, claim, settle }: {
-  request: Request; orderId: number; integrationCode: string; carrierId: number;
+export async function invoiceExistingOrder({ request, orderId, integrationCode, carrierId, separationStage, claim, settle }: {
+  request: Request; orderId: number; integrationCode: string; carrierId: number; separationStage: string;
   claim: () => Promise<boolean>; settle: (state: BillingControlState) => Promise<void>;
 }): Promise<BillingResult> {
   let claimed = false;
@@ -82,6 +82,7 @@ export async function invoiceExistingOrder({ request, orderId, integrationCode, 
       if (!isBilled(snapshot)) throw new Error("O Omie retornou situações fiscais divergentes. Atualize o pedido antes de faturar.");
       return { outcome: "confirmed", message: "O pedido já estava faturado no Omie. Dados sincronizados, sem nova emissão.", snapshot };
     }
+    if (!["10", "20", "30", "40"].includes(separationStage) || ![separationStage, "50"].includes(String(order.cabecalho.etapa))) throw new Error("O pedido não está na etapa de separação confirmada. Confira a tela de Separação antes de faturar.");
     if (order.cabecalho.bloqueado === "S") throw new Error("Pedido bloqueado no Omie. Confira a liberação antes de faturar.");
     if (!hasNoReceivablesPolicy(order)) throw new Error("Corrija o vencimento para 31/12/2026 e confirme que o pedido não gera contas a receber nem boletos antes de faturar. Nenhuma emissão foi solicitada.");
     if (!["10", "20", "30", "40", "50"].includes(String(order.cabecalho.etapa))) throw new Error("A etapa atual do Omie não permite este faturamento.");
@@ -103,6 +104,7 @@ export async function invoiceExistingOrder({ request, orderId, integrationCode, 
       const saved = await readOrder();
       if (saved?.cabecalho?.codigo_pedido !== orderId || saved.cabecalho.codigo_pedido_integracao !== integrationCode ||
         String(saved.cabecalho.codigo_cenario_impostos) !== String(order.cabecalho.codigo_cenario_impostos) ||
+        ![separationStage, "50"].includes(String(saved.cabecalho.etapa)) ||
         saved.infoCadastro?.cancelado === "S" || saved.infoCadastro?.faturado === "S" || saved.cabecalho.bloqueado === "S" ||
         saved.frete?.codigo_transportadora !== carrierId || (saved.frete.valor_frete !== undefined && saved.frete.valor_frete !== 0)) {
         throw new Error("O pedido mudou durante a atualização das informações da NF-e. Consulte o Omie antes de continuar.");

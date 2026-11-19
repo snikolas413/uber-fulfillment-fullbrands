@@ -23,7 +23,7 @@ const { BillingManagement } = load('../src/app/faturamento/billing-management.ts
   '@/lib/billing-list': load('../src/lib/billing-list.ts'),
 });
 const list = { prepared: { page: 1, pageCount: 1, count: 0 }, pending: { page: 1, pageCount: 10, count: 1000 }, billed: { page: 1, pageCount: 1, count: 0 } };
-const base = { id: 'pedido-1', status: 'order_created', omie_order_id: 555, omie_order_number: '1140', omie_last_error: null,
+const base = { separation_state: 'confirmed', id: 'pedido-1', status: 'order_created', omie_order_id: 555, omie_order_number: '1140', omie_last_error: null,
   created_at: '2026-11-10T12:00:00Z', recipients: { full_name: 'Destinatário teste' }, invoices: null,
   shipments: { carrier_id: '123', service_code: '04227', freight_amount: 0 } };
 

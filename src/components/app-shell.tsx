@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Activity, ClipboardList, FileText, LayoutDashboard, LogOut,
-  Settings2, Truck, Users
+  Settings2, Truck, Users, PackageCheck
 } from "lucide-react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
@@ -13,6 +13,7 @@ const navigation = [
   { label: "Visão geral", href: "/", icon: LayoutDashboard },
   { label: "Destinatários", href: "/destinatarios", icon: Users },
   { label: "Pedidos", href: "/pedidos", icon: ClipboardList },
+  { label: "Separação", href: "/separacao", icon: PackageCheck },
   { label: "Faturamento", href: "/faturamento", icon: FileText },
   { label: "Expedição", href: "/expedicao", icon: Truck },
   { label: "Histórico", href: "/historico", icon: Activity },

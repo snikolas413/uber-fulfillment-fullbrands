@@ -16,7 +16,7 @@ export default async function DashboardPage() {
     const [recipients, orders, billing, shipped, recent] = await Promise.all([
       supabase.from("recipients").select("id", { count: "exact", head: true }),
       supabase.from("fulfillments").select("id", { count: "exact", head: true }).neq("status", "cancelled"),
-      supabase.from("fulfillments").select("id", { count: "exact", head: true }).in("status", ["order_created", "billing_pending"]),
+      supabase.from("fulfillments").select("id", { count: "exact", head: true }).in("status", ["order_created", "billing_pending"]).eq("separation_state", "confirmed"),
       supabase.from("fulfillments").select("id", { count: "exact", head: true }).eq("status", "shipped"),
       supabase.from("fulfillments").select("id,status,created_at,omie_order_number,delivery_recipient_name,recipients(full_name),invoices(omie_invoice_number)")
         .order("created_at", { ascending: false }).limit(6),

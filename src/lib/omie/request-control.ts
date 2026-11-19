@@ -1,5 +1,5 @@
 // One outbound request at a time, no automatic replay, bounded successful-read cache.
-const cachedReads = new Set(["ListarClientes", "ConsultarCliente", "ConsultarProduto", "ListarImpostosCenario", "SimularImpostos"]);
+const cachedReads = new Set(["ListarEtapasFaturamento", "ListarClientes", "ConsultarCliente", "ConsultarProduto", "ListarImpostosCenario", "SimularImpostos"]);
 const freshReads = new Set(["ConsultarPedido", "StatusPedido", "ConsultarNF", "ObterRastreio"]);
 const READ_WINDOW_MS = 61_000;
 const MAX_ENTRIES = 500;

@@ -76,7 +76,7 @@ function statusLabel(status: string) {
   const labels: Record<string, string> = {
     ready: "Rascunho preparado",
     order_pending: "Revisar envio",
-    order_created: "Pedido no Omie",
+    order_created: "Aguardando separação",
     billing_pending: "Aguardando faturamento",
     billed: "Faturado",
     shipping_pending: "Aguardando expedição",

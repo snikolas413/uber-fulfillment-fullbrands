@@ -17,6 +17,7 @@ type Recipient = { full_name: string; document_number: string | null; email: str
 type Address = { street: string; number: string; complement: string | null; district: string; city: string; state: string; postal_code: string; validation_status: string };
 type Item = { omie_product_id: number; product_code: string; description: string; ncm: string | null; cfop: string | null; unit: string; quantity: number; unit_price: number };
 type Fulfillment = {
+  separation_state?: string; separation_omie_stage?: string | null; separation_confirmed_at?: string | null;
   id: string; status: string; omie_order_id: number | null; omie_order_number: string | null;
   updated_at: string; delivery_recipient_name?: string | null; omie_send_started_at?: string | null;
   omie_customer_id: number | null; omie_tax_scenario_id: number | null;
@@ -71,7 +72,7 @@ function failureReporter({ supabase, userId }: Awaited<ReturnType<typeof context
       const { error: saveError } = await supabase.from("fulfillments").update({ omie_last_error: (operation + ": " + message).slice(0, 500) }).eq("id", id);
       await audit(supabase, userId, id, "omie.operation.failed", { operation, message, ...retryMetadata(error) });
       if (saveError) console.error("Não foi possível salvar o aviso do pedido.");
-      revalidatePath("/pedidos"); revalidatePath("/faturamento"); revalidatePath("/expedicao");
+      revalidatePath("/pedidos"); revalidatePath("/separacao"); revalidatePath("/faturamento"); revalidatePath("/expedicao");
     } catch { console.error("Não foi possível registrar o erro do pedido."); }
   };
 }
@@ -94,7 +95,7 @@ async function context() {
 }
 async function load(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, id: string) {
   const { data, error } = await supabase.from("fulfillments")
-    .select("id,status,updated_at,delivery_recipient_name,omie_send_started_at,omie_order_id,omie_order_number,omie_customer_id,omie_tax_scenario_id,customer_purchase_order,customer_email,omie_last_error,recipients(full_name,document_number,email,phone),delivery_addresses(street,number,complement,district,city,state,postal_code,validation_status),fulfillment_items(omie_product_id,product_code,description,ncm,cfop,unit,quantity,unit_price)")
+    .select("id,status,separation_state,separation_omie_stage,separation_confirmed_at,updated_at,delivery_recipient_name,omie_send_started_at,omie_order_id,omie_order_number,omie_customer_id,omie_tax_scenario_id,customer_purchase_order,customer_email,omie_last_error,recipients(full_name,document_number,email,phone),delivery_addresses(street,number,complement,district,city,state,postal_code,validation_status),fulfillment_items(omie_product_id,product_code,description,ncm,cfop,unit,quantity,unit_price)")
     .eq("id", id).maybeSingle();
   if (error || !data) throw new Error("Não foi possível carregar o pedido local.");
   return data as unknown as Fulfillment;
@@ -133,7 +134,7 @@ async function reconcile(supabase: Awaited<ReturnType<typeof createSupabaseServe
   else if (row.status === "shipped") next = "shipped";
   else if (row.status === "label_ready") next = "label_ready";
   else if (isInvoiced) next = "billed";
-  else if (stage === "50") next = "billing_pending";
+  else if (row.separation_state === "confirmed" && [row.separation_omie_stage, "50"].includes(stage)) next = "billing_pending";
   else if (stage === "70") next = "shipping_pending";
   else next = "order_created";
 
@@ -160,7 +161,7 @@ async function reconcile(supabase: Awaited<ReturnType<typeof createSupabaseServe
     stage, invoiced: isInvoiced, cancelled, invoice_number_present: Boolean(invoice?.numero_nfe),
     ...(xmlVerified ? { authorization_source: "xml", omie_status: "036", sefaz_status: "100", no_invoice_requested: true } : {}),
   });
-  revalidatePath("/pedidos"); revalidatePath("/faturamento"); revalidatePath("/expedicao"); revalidatePath("/");
+  revalidatePath("/pedidos"); revalidatePath("/separacao"); revalidatePath("/faturamento"); revalidatePath("/expedicao"); revalidatePath("/");
   return {
     status: "success",
     ...(xmlVerified ? { xmlAuthorized: true } : {}),
@@ -241,7 +242,7 @@ async function includeOrder(supabase: Awaited<ReturnType<typeof createSupabaseSe
     omie_order_id: orderId, omie_order_number: orderNumber, integration_code: integrationCode(row.id),
     email_present: Boolean(email), shipping_in_omie: true, reference_order: reference.number,
   });
-  revalidatePath("/pedidos"); revalidatePath("/faturamento"); revalidatePath("/");
+  revalidatePath("/pedidos"); revalidatePath("/separacao"); revalidatePath("/faturamento"); revalidatePath("/");
   const selected = await applyMiniEnviosFreight(supabase, userId, { ...row, status: "order_created", omie_order_id: orderId, omie_order_number: orderNumber }, carrierId);
   return { status: selected.status, message: "Pedido criado no Omie" + (orderNumber ? " com número " + orderNumber : "") + ". " + selected.message };
 }
@@ -426,6 +427,7 @@ export async function invoiceOrderAction(id: string, confirmed = false): Promise
     reportFailure = failureReporter({ supabase, userId }, row.id, "Faturamento");
     if (!row.omie_order_id || !row.omie_order_number || !["order_created", "billing_pending", "billed"].includes(row.status)) return { status: "error", message: "O pedido precisa estar criado no Omie para ser faturado." };
     if (row.omie_last_error?.startsWith("Frete: ")) return { status: "warning", message: "Resolva a pendência de frete deste pedido antes de faturar." };
+    if (row.separation_state !== "confirmed" || !row.separation_confirmed_at || !row.separation_omie_stage) return { status: "warning", message: "Envie e confirme este pedido na tela de Separação antes de faturar." };
     const { data: shipment, error: shipmentError } = await supabase.from("shipments").select("carrier_id,service_code,freight_amount").eq("fulfillment_id", id).maybeSingle();
     const carrierId = Number(shipment?.carrier_id);
     if (shipmentError || !shipment || !Number.isSafeInteger(carrierId) || carrierId <= 0 || shipment.freight_amount == null || Number(shipment.freight_amount) !== 0 ||
@@ -453,7 +455,7 @@ export async function invoiceOrderAction(id: string, confirmed = false): Promise
         .in("status", ["billing_processing", "billing_submitting", "billing_submitted"]).is("omie_invoice_number", null).is("access_key", null);
       if (error) throw new Error("Não foi possível salvar o controle de faturamento.");
     };
-    let result = await invoiceExistingOrder({ request: callOmie, orderId: row.omie_order_id, integrationCode: integrationCode(id), carrierId, claim, settle });
+    let result = await invoiceExistingOrder({ request: callOmie, orderId: row.omie_order_id, integrationCode: integrationCode(id), carrierId, separationStage: row.separation_omie_stage, claim, settle });
     if (result.outcome === "confirmed" && !result.snapshot?.ListaNfe?.some(note => note.numero_nfe && note.chave_nfe)) {
       result = { ...result, outcome: "submitted", snapshot: undefined, message: "O Omie informou faturamento. Aguardando os dados da NF-e na fila de confirmação." };
     }

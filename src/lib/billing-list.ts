@@ -7,7 +7,7 @@ export type BillingListState = Record<BillingQueue, BillingPageInfo>;
 export type BillingPages = Record<BillingQueue, number>;
 
 const preparedColumns = "id, customer_purchase_order, customer_email, created_at, delivery_recipient_name,recipients(full_name), fulfillment_items(product_code, description, quantity, unit_price, line_total)";
-const fiscalColumns = "id, status, omie_order_id, omie_order_number, omie_last_error, created_at, delivery_recipient_name,recipients(full_name), invoices(omie_invoice_number, access_key, status, issued_at, danfe_url, xml_available, confirmation_state, confirmation_last_error), shipments(carrier_id, service_code, freight_amount)";
+const fiscalColumns = "id, status, separation_state, omie_order_id, omie_order_number, omie_last_error, created_at, delivery_recipient_name,recipients(full_name), invoices(omie_invoice_number, access_key, status, issued_at, danfe_url, xml_available, confirmation_state, confirmation_last_error), shipments(carrier_id, service_code, freight_amount)";
 
 export function billingListParams(params: Record<string, string | string[] | undefined>): BillingPages {
   const page = (value: string | string[] | undefined) => typeof value === "string" && /^\d{1,7}$/.test(value) ? Math.max(1, Number(value)) : 1;
@@ -24,8 +24,9 @@ export function billingPageUrl(pages: BillingPages, queue: BillingQueue, page: n
 
 export async function loadBillingQueue(client: SupabaseClient, queue: BillingQueue, requestedPage: number) {
   const fetchPage = (page: number, head = false) => {
-    let query = client.from("fulfillments").select(head ? "id" : queue === "prepared" ? preparedColumns : fiscalColumns, { count: "exact", head });
+    let query = client.from("fulfillments").select(head ? (queue === "pending" ? "id,invoices()" : "id") : queue === "prepared" ? preparedColumns : fiscalColumns, { count: "exact", head });
     query = queue === "pending" ? query.in("status", ["order_created", "billing_pending"]) : query.eq("status", queue === "prepared" ? "ready" : "billed");
+    if (queue === "pending") query = query.or("separation_state.eq.confirmed,invoices.not.is.null");
     if (head) return query;
     return query.order("created_at", { ascending: queue === "pending" }).order("id", { ascending: queue === "pending" })
       .range((page - 1) * BILLING_PAGE_SIZE, page * BILLING_PAGE_SIZE - 1);

@@ -50,7 +50,7 @@ test('consultas mantêm os critérios dos indicadores e carregam apenas seis ped
   const element = await page.default();
   assert.ok(element);
   assert.equal(calls.length, 5);
-  assert.deepEqual(calls.slice(0, 4).map(call => call.filters), [[], [['neq', 'status', 'cancelled']], [['in', 'status', ['order_created', 'billing_pending']]], [['eq', 'status', 'shipped']]]);
+  assert.deepEqual(calls.slice(0, 4).map(call => call.filters), [[], [['neq', 'status', 'cancelled']], [['in', 'status', ['order_created', 'billing_pending']], ['eq','separation_state','confirmed']], [['eq', 'status', 'shipped']]]);
   assert.equal(calls[4].limit, 6);
   assert.deepEqual(calls[4].order, ['created_at', { ascending: false }]);
   assert.ok(calls.slice(0, 4).every(call => call.options.count === 'exact' && call.options.head === true));

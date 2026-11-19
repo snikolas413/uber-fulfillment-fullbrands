@@ -14,7 +14,7 @@ const formatNumber = (value: number | null) => value === null ? "—" : new Intl
 const cleanNumber = (value: string) => value.replace(/^0+(?=\d)/, "");
 const situations: Record<string, { label: string; tone: string }> = {
   ready: { label: "Preparado", tone: "neutral" }, order_pending: { label: "Envio em andamento", tone: "blue" },
-  order_created: { label: "No Omie", tone: "blue" }, billing_pending: { label: "Aguardando faturamento", tone: "amber" },
+  order_created: { label: "Aguardando separação", tone: "blue" }, billing_pending: { label: "Aguardando faturamento", tone: "amber" },
   billed: { label: "Faturado", tone: "green" }, shipping_pending: { label: "Aguardando etiqueta", tone: "amber" },
   label_ready: { label: "Etiqueta disponível", tone: "green" }, shipped: { label: "Enviado", tone: "green" },
   error: { label: "Revisar pedido", tone: "red" }, cancelled: { label: "Cancelado", tone: "neutral" },

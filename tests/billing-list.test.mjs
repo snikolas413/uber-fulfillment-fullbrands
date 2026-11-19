@@ -18,7 +18,7 @@ function database(rows, failure = false) {
       const url = new URL(input); requests.push(url);
       if (failure) return new Response(JSON.stringify({ message: 'Falha na consulta' }), { status: 500 });
       const expression = url.searchParams.get('status');
-      const filtered = rows.filter(row => expression === 'in.(order_created,billing_pending)' ? ['order_created', 'billing_pending'].includes(row.status) : row.status === expression.slice(3));
+      const filtered = rows.filter(row => expression === 'in.(order_created,billing_pending)' ? ['order_created', 'billing_pending'].includes(row.status) && (row.separation_state === 'confirmed' || row.invoices?.length) : row.status === expression.slice(3));
       const offset = Number(url.searchParams.get('offset') ?? 0);
       const limit = Number(url.searchParams.get('limit'));
       const data = filtered.slice(offset, offset + limit);
@@ -29,7 +29,18 @@ function database(rows, failure = false) {
   });
   return { client, requests };
 }
-const pending = count => Array.from({ length: count }, (_, i) => ({ id: 'pending-' + i, status: i % 2 ? 'order_created' : 'billing_pending', omie_order_id: i + 1 }));
+const pending = count => Array.from({ length: count }, (_, i) => ({ id: 'pending-' + i, status: i % 2 ? 'order_created' : 'billing_pending', separation_state: 'confirmed', omie_order_id: i + 1 }));
+
+test('fila fiscal exclui pedido sem separação e preserva emissões anteriores para conferência',async()=>{
+  const {client,requests}=database([
+    {id:'sem-separacao',status:'order_created',separation_state:'none'},
+    {id:'liberado',status:'billing_pending',separation_state:'confirmed'},
+    {id:'emissao-anterior',status:'billing_pending',separation_state:'none',invoices:[{status:'billing_unknown'}]},
+  ]);
+  const result=await loadBillingQueue(client,'pending',1);
+  assert.deepEqual(result.data.map(row=>row.id),['liberado','emissao-anterior']);
+  assert.equal(requests[0].searchParams.get('or'),'(separation_state.eq.confirmed,invoices.not.is.null)');
+});
 
 test('1000 pedidos aguardando faturamento ficam acessíveis em dez páginas sem perda ou repetição', async () => {
   const { client, requests } = database(pending(1000));

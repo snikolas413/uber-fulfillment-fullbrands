@@ -13,6 +13,7 @@ type InvoiceRecord = { omie_invoice_number: string | null; access_key: string | 
 type Shipment = { carrier_id: string | null; service_code: string | null; freight_amount: number | null };
 export type BillingRow = {
   delivery_recipient_name?: string | null;
+  separation_state?: string;
   id: string; status: string; omie_order_id: number | null; omie_order_number: string | null; omie_last_error: string | null;
   created_at: string; recipients: { full_name: string } | null;
   invoices: InvoiceRecord | InvoiceRecord[] | null; shipments: Shipment | Shipment[] | null;
@@ -27,6 +28,7 @@ function blockedReason(row: BillingRow, result?: Result) {
   if (!["order_created", "billing_pending"].includes(row.status) || !row.omie_order_id || !row.omie_order_number) return "Pedido ainda não disponível no Omie";
   if ((invoice?.status.startsWith("billing_") && invoice.status !== "billing_rejected") ||
     (result?.billingOutcome && result.billingOutcome !== "rejected")) return "Solicitação registrada. Consulte o Omie antes de qualquer nova emissão.";
+  if (row.separation_state !== "confirmed") return "Envie o pedido para separação antes de faturar";
   if (row.omie_last_error?.startsWith("Frete: ")) return "Resolva a pendência de frete antes de faturar";
   const shipment = first(row.shipments);
   if (!shipment?.carrier_id || !shipment.service_code || !(shipment.service_code === "04227" || isMiniEnviosName(shipment.service_code)) ||
