@@ -17,7 +17,7 @@ function load(path, modules = {}) {
 const { BillingManagement } = load('../src/app/faturamento/billing-management.tsx', {
   'next/navigation': { useRouter: () => ({ refresh() {} }) },
   '@/app/pedidos/omie-actions': { invoiceOrderAction: () => assert.fail('Renderização não pode solicitar emissão') },
-  '@/components/omie-action-button': { OmieActionButton: () => React.createElement('button', null, 'Atualizar Omie') },
+  '@/components/omie-action-button': { OmieActionButton: ({ kind }) => React.createElement('button', { 'data-action': kind }, kind === 'confirm-manual-freight' ? 'Conferir ajuste no Omie' : 'Atualizar Omie') },
   '@/lib/omie/billing-batch': load('../src/lib/omie/billing-batch.ts'),
   '@/lib/omie/freight-selection': load('../src/lib/omie/freight-selection.ts'),
   '@/lib/billing-list': load('../src/lib/billing-list.ts'),
@@ -48,4 +48,13 @@ test('perfil consulta não recebe controles de seleção ou emissão', () => {
   assert.ok(!html.includes('type="checkbox"'));
   assert.ok(!html.includes('Faturar selecionados'));
   assert.match(html, /Atualizar Omie/);
+});
+
+test('conferir ajuste manual aparece só para operador com pendência de frete e sem emissão', () => {
+  const render = (canBill, row) => renderToStaticMarkup(React.createElement(BillingManagement, { canBill, list, rows: [row] }));
+  const blocked = { ...base, omie_last_error: 'Frete: Conferência pendente', shipments: null };
+  assert.match(render(true, blocked), /Conferir ajuste no Omie/);
+  assert.doesNotMatch(render(false, blocked), /Conferir ajuste no Omie/);
+  assert.doesNotMatch(render(true, { ...blocked, invoices: { status: 'billing_unknown' } }), /Conferir ajuste no Omie/);
+  assert.doesNotMatch(render(true, { ...blocked, status: 'billed' }), /Conferir ajuste no Omie/);
 });

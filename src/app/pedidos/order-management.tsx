@@ -230,6 +230,7 @@ export function OrderManagement({
                         {canWrite && (["order_created", "billing_pending", "billed"].includes(draft.status) || sendResults[draft.id]) && <OmieActionButton disabled={sending} fulfillmentId={draft.id} kind="sync-order" size="small" />}
                         {canWrite && !sending && draft.omie_order_id && ["order_created", "billing_pending"].includes(draft.status) && <>
                           {draft.omie_last_error?.startsWith("Frete: ") && <OmieActionButton fulfillmentId={draft.id} kind="select-mini" size="small" />}
+                          {draft.omie_last_error?.startsWith("Frete: ") && <OmieActionButton fulfillmentId={draft.id} kind="confirm-manual-freight" size="small" />}
                           <ShippingEditor fulfillmentId={draft.id} current={(() => { const shipment = Array.isArray(draft.shipments) ? draft.shipments[0] : draft.shipments; return { carrierId: shipment?.carrier_id && /^\d+$/.test(shipment.carrier_id) ? Number(shipment.carrier_id) : null, packageCount: shipment?.package_count, freightAmount: shipment?.freight_amount, deliveryForecast: shipment?.estimated_delivery_date, modality: shipment?.service_modality }; })()} />
                         </>}
                         {!canWrite && "Somente consulta"}

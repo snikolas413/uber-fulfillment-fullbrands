@@ -153,6 +153,13 @@ export function BillingManagement({ rows, canBill, list }: { rows: BillingRow[];
             {!result && !row.omie_last_error && invoice?.confirmation_last_error && <small className="omie-action-result omie-action-result-warning">{invoice.confirmation_last_error}</small>}
             {!result && !row.omie_last_error && blocked && <small>{blocked}</small>}
             {!running && <OmieActionButton fulfillmentId={row.id} kind="sync-order" size="small" />}
+            {canBill && !running && ["order_created", "billing_pending"].includes(row.status) &&
+              (blocked === "Resolva a pendência de frete antes de faturar" || blocked === "Frete ainda não confirmado") && <>
+                <small>Após ajustar Correios + Mini Envios grátis no Omie, confira o ajuste para liberar este pedido.</small>
+                <OmieActionButton fulfillmentId={row.id} kind="confirm-manual-freight" size="small" onSuccess={() => {
+                  setResults(previous => { const next = { ...previous }; delete next[row.id]; return next; });
+                }} />
+              </>}
           </td>
         </tr>;
       })}</tbody>

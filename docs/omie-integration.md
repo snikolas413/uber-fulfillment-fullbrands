@@ -118,3 +118,11 @@ Continuam como propostas futuras: pré-validar o lote, ampliar o cache dos cadas
 O lote de etiquetas também mantém até dois pedidos distintos em andamento, por requisições HTTP independentes que reutilizam a ação autenticada de geração. As chamadas Omie continuam serializadas pelo controle global. A validação de NF-e autorizada e vinculada, a reserva atômica da geração e o bloqueio de estados `processing`/`unknown` são preservados. Etiquetas salvas são reutilizadas. Uma falha encerra a tentativa daquele pedido e libera a vaga, sem repetir operações de frete ou etiqueta e respeitando a pausa global quando houver.
 
 O PDF do lote inclui somente sucessos com arquivo confirmado e mantém a ordem da seleção, mesmo quando outro pedido termina antes. “Parar novos envios” impede iniciar os pedidos restantes e permite concluir os dois ativos. A página deve permanecer aberta até concluir a preparação e montagem do PDF.
+
+## Liberar frete após ajuste manual no Omie (19/11/2026)
+
+Nas linhas com frete pendente de Faturamento e Pedidos, “Conferir ajuste no Omie” pede que o operador confirme a seleção manual de Correios + Mini Envios grátis. A consulta de pedido não informa o serviço selecionado; essa parte é uma declaração explícita do operador e fica na auditoria. A ação usa somente `ConsultarPedido` e `ValidarPedidoVenda`, pelo controle habitual da API, sem selecionar frete, gerar etiqueta, alterar o pedido ou faturar no Omie.
+
+A conferência exige vínculo de integração, pedido não faturado/cancelado/bloqueado em etapa permitida, transportadora Correios 2757271756, frete/seguro/despesas zerados, modalidade 0 (remetente), 1–20 volumes e previsão de entrega válida. Campo de frete omitido é tratado como zero após a declaração do operador, conforme o retorno usual do Omie. Divergências mantêm o bloqueio e exibem o motivo.
+
+Uma função transacional com privilégios do usuário (`confirm_manual_freight`) verifica novamente a versão do pedido e impede a liberação quando há emissão em andamento/incerta, NF-e registrada ou geração de etiqueta iniciada. Ela atualiza somente os dados locais de frete, remove apenas o aviso iniciado por `Frete: ` e registra o usuário, os dados anteriores e a declaração. Não apaga nem reinicia o controle de emissão ou etiqueta. O pedido continua sujeito a todas as conferências normais no momento de faturar.
