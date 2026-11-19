@@ -54,6 +54,15 @@ com os Correios. Falhas dessa integração são apresentadas ao operador.
   de S e exatamente uma NF-e de saída com status 006, protocolo e chave válida.
 - `ConsultarNF` confirma chave, pedido, modelo 55, saída, número, série e data.
   Cancelamento, denegação, inutilização e divergências bloqueiam geração.
+- Exceção para `status_nfe=036`: exige todas as conferências acima e o XML original
+  `nfeProc` indicado por `xml_distr` da resposta autenticada do Omie. O download só
+  aceita HTTPS em `cdn.omie.com.br`, até 2 MB, sem DTD ou entidades, e redirecionamentos
+  permanecem nesse domínio. O XML deve conter uma única NF-e e protocolo, de produção,
+  com `cStat=100`, chave, número, série, data e protocolo idênticos aos consultados.
+  A autorização é normalizada localmente para `006` após essa prova; o status original
+  `036` e a origem XML ficam na auditoria. Não altera o Omie nem repete faturamento.
+  “Atualizar Omie” aplica a mesma validação ao sincronizar esse caso, evitando voltar
+  a bloquear a impressão após uma etiqueta já conferida. Qualquer falha mantém o bloqueio.
 - O serviço local precisa ser Mini Envios e a transportadora Correios usada
   nessa integração. A quantidade de páginas deve coincidir com os volumes.
 - A reserva atômica `label_generation_state=none -> processing` impede pedidos

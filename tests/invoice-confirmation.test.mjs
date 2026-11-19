@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
+import * as xmlDom from '@xmldom/xmldom';
 
 function load(path, modules = {}) {
   const exports = {};
@@ -9,7 +10,8 @@ function load(path, modules = {}) {
   new Function('require', 'exports', code)(name => { if (!(name in modules)) throw new Error(name); return modules[name]; }, exports);
   return exports;
 }
-const fiscal = load('../src/lib/omie/shipping-invoice.ts');
+const xmlAuthorization = load('../src/lib/omie/xml-authorization.ts', { '@xmldom/xmldom': xmlDom });
+const fiscal = load('../src/lib/omie/shipping-invoice.ts', { './xml-authorization': xmlAuthorization });
 const confirmation = load('../src/lib/omie/invoice-confirmation.ts', { './shipping-invoice': fiscal });
 const prefix = '4226110000000000000055001000001234100000000';
 let sum = 0;
@@ -58,6 +60,7 @@ function worker(options = {}) {
   const icms=load('../src/lib/omie/item-icms.ts');
   const billing=load('../src/lib/omie/invoice-order.ts',{'@/lib/omie/item-icms':icms,'@/lib/omie/invoice-notes':notes,'@/lib/omie/payment-policy':payment});
   const actions=load('../src/app/pedidos/omie-actions.ts',{
+    '@/lib/omie/shipping-invoice': fiscal,
     'next/cache':{revalidatePath(){}},'@/lib/supabase/server':{createSupabaseServerClient:async()=>db},
     '@/lib/omie/invoice-confirmation':confirmation,'@/lib/omie/invoice-order':billing,
     '@/lib/omie/freight-selection':load('../src/lib/omie/freight-selection.ts'),'@/lib/omie/item-icms':icms,

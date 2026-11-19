@@ -162,7 +162,7 @@ function actionsStub(options = {}) {
     from(table) {
       let patch;
       const query = {
-        select() { return query; }, eq() { return query; }, is() { return query; }, or() { return query; },
+        select() { return query; }, eq() { return query; }, is() { return query; }, or() { return query; }, in() { return query; },
         update(value) { patch = value; writes.push(value); if (table === 'fulfillments') Object.assign(row, value); return query; },
         async maybeSingle() { return { data: table === 'user_profiles' ? { role: options.role ?? 'operador', is_active: true } : patch ? options.claimDenied ? null : { id } : row, error: null }; },
         async insert(value) { audits.push(value); return { error: null }; },
@@ -174,6 +174,11 @@ function actionsStub(options = {}) {
   };
   class ApiError extends Error {}
   const actions = loadModule('../src/app/pedidos/omie-actions.ts', {
+    '@/lib/omie/shipping-invoice': { readShippingInvoice(_request, orderId, code, snapshot) {
+      assert.ok(options.xmlAuthorized); assert.equal(orderId, 555); assert.equal(code, integrationCode);
+      assert.equal(snapshot.ListaNfe[0].status_nfe, '036');
+      return { key: options.orderStatus.ListaNfe[0].chave_nfe, authorizationSource: 'xml' };
+    } },
     'next/cache': { revalidatePath() {} },
     '@/lib/supabase/server': { createSupabaseServerClient: async () => client },
     '@/lib/omie/freight-selection': freight,
@@ -392,4 +397,15 @@ test('duas sessões no mesmo pedido reservam antes da validação externa e incl
   assert.equal(stub.calls.length, 1);
   release(); assert.equal((await first).status, 'success');
   assert.equal(stub.calls.filter(call => call.method === 'IncluirPedido').length, 1);
+});
+
+test('sincronização de 036 só normaliza autorização local após a conferência XML', async () => {
+  const key = '42261141244775000190550010000013031053506334';
+  const stub = actionsStub({ status: 'order_created', xmlAuthorized: true,
+    orderStatus: { codigo_pedido_integracao: integrationCode, faturada: 'S', etapa: '60', ListaNfe: [{ tipo: 'S', status_nfe: '036', chave_nfe: key, numero_nfe: '1303', protocolo: '242260558076422' }] } });
+  const result = await stub.actions.syncOmieOrderAction(id);
+  assert.equal(result.status, 'success', result.message);
+  assert.equal(stub.shipments.find(value => value.access_key === key).status, '006');
+  assert.equal(stub.audits.find(value => value.action === 'omie.order.synced').after_summary.authorization_source, 'xml');
+  assert.deepEqual(stub.calls.map(value => value.method), ['StatusPedido']);
 });

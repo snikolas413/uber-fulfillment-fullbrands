@@ -29,8 +29,16 @@ export async function generateShippingLabelAction(id: string, confirmed = false,
       if (saveError || auditError) throw new Error("Não foi possível registrar o aviso da etiqueta.");
     };
     const invoice = await readShippingInvoice(callOmie, Number(row.omie_order_id), "UFB-" + id.replaceAll("-", ""));
+    if (invoice.authorizationSource === "xml") {
+      const { error: proofError } = await db.from("audit_logs").insert({ actor_id: auth.user.id, entity_type: "fulfillment", entity_id: id,
+        action: "shipping.invoice_xml_verified", source: "application", after_summary: {
+          invoice_number: invoice.number, access_key: invoice.key, protocol: invoice.protocol,
+          omie_status: invoice.omieStatus, sefaz_status: "100", no_invoice_requested: true,
+        } });
+      if (proofError) throw new Error("Não foi possível registrar a autorização fiscal conferida. Nenhuma etiqueta foi solicitada.");
+    }
     const { error: invoiceError } = await db.from("invoices").upsert({ fulfillment_id: id, access_key: invoice.key, omie_invoice_number: invoice.number,
-      series: invoice.series, status: "006", ...(invoice.issuedAt ? { issued_at: invoice.issuedAt } : {}) }, { onConflict: "fulfillment_id" });
+      series: invoice.series, status: "006", ...(invoice.protocol ? { protocol: invoice.protocol } : {}), ...(invoice.issuedAt ? { issued_at: invoice.issuedAt } : {}) }, { onConflict: "fulfillment_id" });
     const { error: syncError } = await db.from("fulfillments").update({ status: "billed" }).eq("id", id).eq("status", "billing_pending");
     if (invoiceError || syncError) throw new Error("Não foi possível sincronizar a NF-e autorizada antes da expedição.");
     const { error: initError } = await db.from("shipments").upsert({ fulfillment_id: id }, { onConflict: "fulfillment_id", ignoreDuplicates: true });
@@ -117,7 +125,8 @@ export async function generateShippingLabelAction(id: string, confirmed = false,
     const { error: statusError } = await db.from("fulfillments").update({ status: "label_ready" }).eq("id", id).in("status", ["billing_pending", "billed", "shipping_pending", "label_ready"]);
     if (statusError) throw new Error("A etiqueta foi salva, mas a sincronização local não foi concluída. Atualize o pedido.");
     await db.from("audit_logs").insert({ actor_id: auth.user.id, entity_type: "fulfillment", entity_id: id, action: "shipping.label_ready", source: "application",
-      after_summary: { invoice_number: invoice.number, page_format: "100x150mm", volumes, original_preserved: true } });
+      after_summary: { invoice_number: invoice.number, page_format: "100x150mm", volumes, original_preserved: true,
+        ...(invoice.authorizationSource ? { authorization_source: invoice.authorizationSource, omie_status: invoice.omieStatus } : {}) } });
     revalidatePath("/expedicao"); revalidatePath("/pedidos"); revalidatePath("/faturamento");
     return { status: "success", message: "Etiqueta dos Correios com NF-e pronta em 100 × 150 mm. Imprima em tamanho real (100%).", url };
   } catch (error) {

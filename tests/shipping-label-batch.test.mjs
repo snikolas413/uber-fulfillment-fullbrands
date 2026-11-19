@@ -17,7 +17,8 @@ function load(path, modules = {}) {
 }
 const batch = load('../src/lib/omie/shipping-label-batch.ts');
 const merger = load('../src/lib/omie/merge-label-pdfs.ts');
-const fiscal = load('../src/lib/omie/shipping-invoice.ts');
+const xmlAuthorization = load('../src/lib/omie/xml-authorization.ts', { '@xmldom/xmldom': require('@xmldom/xmldom') });
+const fiscal = load('../src/lib/omie/shipping-invoice.ts', { './xml-authorization': xmlAuthorization });
 const composer = load('../src/lib/omie/shipping-label-pdf.ts', { './shipping-invoice': fiscal });
 function makeKey(number) {
   const prefix = '4226110000000000000055001' + String(number).padStart(9, '0') + '100000000';

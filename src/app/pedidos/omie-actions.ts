@@ -10,6 +10,7 @@ import { ORDER_REFERENCE as reference } from "@/lib/omie/order-reference";
 import { DELIVERY_INVOICE_NOTE } from "@/lib/omie/invoice-notes";
 import { initialPaymentSchedule, PAYMENT_TERMS_CODE } from "@/lib/omie/payment-policy";
 import { CONFIRMATION_INTERVAL_MS, MAX_CONFIRMATION_CHECKS, inspectInvoiceConfirmation } from "@/lib/omie/invoice-confirmation";
+import { readShippingInvoice } from "@/lib/omie/shipping-invoice";
 
 export type OmieActionResult = { status: "success" | "error" | "warning"; message: string; retryAt?: number };
 type Recipient = { full_name: string; document_number: string | null; email: string | null; phone: string | null };
@@ -113,7 +114,16 @@ async function statusFromOmie(row: Fulfillment) {
 function hasOmieOrder(status: OmieStatus) {
   return Boolean(status.codigo_pedido || status.numero_pedido || status.codigo_pedido_integracao);
 }
-async function reconcile(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, userId: string, row: Fulfillment, status: OmieStatus): Promise<OmieActionResult> {
+async function reconcile(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, userId: string, row: Fulfillment, status: OmieStatus): Promise<OmieActionResult & { xmlAuthorized?: boolean }> {
+  let xmlVerified = false;
+  if (status.cancelada !== "S" && status.faturada === "S" && status.ListaNfe?.some(nfe => nfe.tipo === "S" && nfe.status_nfe === "036")) {
+    if (!row.omie_order_id) throw new Error("Pedido sem vínculo local para conferir a autorização no XML.");
+    const authorized = await readShippingInvoice(callOmie, row.omie_order_id, integrationCode(row.id), status);
+    // Normalize local fiscal authorization only after checking the original XML.
+    // Keep 036 as the source status in the audit; never modify Omie or reissue.
+    status = { ...status, ListaNfe: status.ListaNfe.map(nfe => nfe.chave_nfe === authorized.key ? { ...nfe, status_nfe: "006" } : nfe) };
+    xmlVerified = true;
+  }
   const invoice = status.ListaNfe?.find((nfe) => nfe.numero_nfe || nfe.chave_nfe);
   const isInvoiced = status.faturada === "S" || Boolean(invoice?.numero_nfe || invoice?.chave_nfe);
   const cancelled = status.cancelada === "S";
@@ -148,10 +158,12 @@ async function reconcile(supabase: Awaited<ReturnType<typeof createSupabaseServe
   await audit(supabase, userId, row.id, "omie.order.synced", {
     omie_order_number: status.numero_pedido ?? row.omie_order_number,
     stage, invoiced: isInvoiced, cancelled, invoice_number_present: Boolean(invoice?.numero_nfe),
+    ...(xmlVerified ? { authorization_source: "xml", omie_status: "036", sefaz_status: "100", no_invoice_requested: true } : {}),
   });
   revalidatePath("/pedidos"); revalidatePath("/faturamento"); revalidatePath("/expedicao"); revalidatePath("/");
   return {
     status: "success",
+    ...(xmlVerified ? { xmlAuthorized: true } : {}),
     message: cancelled ? "O pedido está cancelado no Omie."
       : isInvoiced ? "Pedido sincronizado. Dados da NF-e recebidos do Omie."
       : "Pedido sincronizado. Etapa atual no Omie: " + (stage || "não informada") + ".",
@@ -393,7 +405,7 @@ export async function syncOmieOrderAction(id: string): Promise<OmieActionResult>
     const status = await statusFromOmie(row);
     if (!hasOmieOrder(status)) return { status: "warning", message: "O Omie não retornou esse pedido. Confira o ERP antes de reenviar." };
     const reconciled = await reconcile(supabase, userId, row, status);
-    if (row.omie_order_id && status.faturada === "S" && inspectInvoiceConfirmation(status, row.omie_order_id, integrationCode(row.id)).confirmed) {
+    if (row.omie_order_id && status.faturada === "S" && (reconciled.xmlAuthorized || inspectInvoiceConfirmation(status, row.omie_order_id, integrationCode(row.id)).confirmed)) {
       await supabase.from("invoices").update({ confirmation_state: "confirmed", confirmation_last_error: null, confirmation_next_check_at: null })
         .eq("fulfillment_id", id).in("confirmation_state", ["pending", "error"]);
     }

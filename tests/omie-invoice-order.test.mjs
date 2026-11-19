@@ -292,6 +292,7 @@ function actionHarness(options = {}) {
   };
   class ApiError extends Error {}
   const actions = loadModule('../src/app/pedidos/omie-actions.ts', {
+    '@/lib/omie/shipping-invoice': { readShippingInvoice() { throw new Error('Unexpected XML authorization'); } },
     'next/cache': { revalidatePath() {} }, '@/lib/supabase/server': { createSupabaseServerClient: async () => client },
     '@/lib/omie/freight-selection': freight, '@/lib/omie/invoice-order': billing,
     '@/lib/omie/item-icms': itemIcms,

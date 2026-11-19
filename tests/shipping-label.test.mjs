@@ -12,7 +12,8 @@ function load(path, modules = {}) {
   new Function('require', 'exports', code)(name => name in modules ? modules[name] : require(name), exports);
   return exports;
 }
-const fiscal = load('../src/lib/omie/shipping-invoice.ts');
+const xmlAuthorization = load('../src/lib/omie/xml-authorization.ts', { '@xmldom/xmldom': require('@xmldom/xmldom') });
+const fiscal = load('../src/lib/omie/shipping-invoice.ts', { './xml-authorization': xmlAuthorization });
 const download = load('../src/lib/omie/label-download.ts');
 const generation = load('../src/lib/omie/generate-shipping-label.ts', { './label-download': download });
 const pdf = load('../src/lib/omie/shipping-label-pdf.ts', { './shipping-invoice': fiscal, 'bwip-js/node': bwipjs, 'pdf-lib': pdfLib });
@@ -189,14 +190,15 @@ test('falha fiscal salva aviso no pedido e auditoria, devolvendo a pausa sem ger
 });
 
 test('fluxo completo salva original e PDF combinado, confirma NF local e reimprime sem nova geração', async () => {
-  for (const mode of [false, true, 'wrongTracking', 'busy', 'claimChanged']) {
-  const retryUnknown = mode !== false;
+  for (const mode of [false, true, 'wrongTracking', 'busy', 'claimChanged', 'xmlAuthorized']) {
+  const retryUnknown = mode !== false && mode !== 'xmlAuthorized';
   const id = '11111111-1111-4111-8111-111111111111';
   const row = { id, status: 'billing_pending', omie_order_id: 1 };
   const shipment = { label_generation_state: mode === 'busy' ? 'processing' : retryUnknown ? 'unknown' : 'none', label_requested_at: retryUnknown ? '2026-11-18T22:00:00Z' : null, tracking_code: 'AV096096192BR', label_source_urls: null, label_invoice_key: null, label_storage_path: null, package_count: 1, service_code: '04227', carrier_id: '2757271756', label_last_error: 'Erro anterior', label_error_at: '2026-11-11' };
   const savedInvoice = {};
   const blobs = new Map();
   const operations = [];
+  const audits = [];
   const db = {
     auth: { getUser: async () => ({ data: { user: { id: 'operator' } } }) },
     from(table) {
@@ -209,7 +211,7 @@ test('fluxo completo salva original e PDF combinado, confirma NF local e reimpri
       const q = { select() { return q; }, eq(key, value) { filters.push([key, value]); return q; }, in() { return q; },
         update(value) { patch = value; return q; },
         async upsert(value) { if (table === 'invoices') Object.assign(savedInvoice, value); return { error: null }; },
-        async insert() { return { error: null }; },
+        async insert(value) { audits.push(value); return { error: null }; },
         async maybeSingle() { if (table === 'user_profiles') return { data: { is_active: true, role: 'operador' } }; if (patch) {
           if (!filters.every(([key, value]) => key === 'fulfillment_id' || key === 'id' || target[key] === value)) return { data: null };
           apply(); return { data: { id: 'shipment' } }; } return { data: target }; },
@@ -236,12 +238,12 @@ test('fluxo completo salva original e PDF combinado, confirma NF local e reimpri
       } }; }
       assert.equal(method, 'GerarEtiqueta'); return { cCodStatus: '0', listaEtiqueta: [{ cUrlEtiqueta: 'https://cdn.omie.com.br/label.pdf' }] };
     } },
-    '@/lib/omie/shipping-invoice': { readShippingInvoice: async () => invoice },
+    '@/lib/omie/shipping-invoice': { readShippingInvoice: async () => mode === 'xmlAuthorized' ? { ...invoice, protocol: '242260558076422', authorizationSource: 'xml', omieStatus: '036' } : invoice },
     '@/lib/omie/label-download': { downloadOmieLabel: async () => source }, '@/lib/omie/shipping-label-pdf': pdf,
     '@/lib/omie/generate-shipping-label': generation, '@/lib/omie/freight-selection': { isMiniEnviosName: () => false },
   });
   const first = await actions.generateShippingLabelAction(id, true, retryUnknown);
-  if (typeof mode === 'string') {
+  if (typeof mode === 'string' && mode !== 'xmlAuthorized') {
     assert.equal(first.status, 'error'); assert.ok(!operations.includes('GerarEtiqueta')); assert.equal(blobs.size, 0); continue;
   }
   assert.equal(first.status, 'success', first.message);
@@ -249,6 +251,10 @@ test('fluxo completo salva original e PDF combinado, confirma NF local e reimpri
   assert.equal(shipment.label_generation_state, 'ready'); assert.equal(row.status, 'label_ready');
   assert.equal(shipment.label_last_error, null); assert.equal(shipment.label_error_at, null);
   assert.equal(savedInvoice.access_key, key); assert.equal(savedInvoice.status, '006');
+  if (mode === 'xmlAuthorized') {
+    assert.equal(savedInvoice.protocol, '242260558076422');
+    assert.equal(audits.find(audit => audit.action === 'shipping.invoice_xml_verified').after_summary.omie_status, '036');
+  }
   assert.equal(blobs.size, 2);
   assert.equal((await actions.generateShippingLabelAction(id, true)).status, 'success');
   assert.deepEqual(operations, retryUnknown ? ['ConsultarPedido', 'GerarEtiqueta'] : ['GerarEtiqueta']);
