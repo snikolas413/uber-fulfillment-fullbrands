@@ -5,6 +5,7 @@ export type LabelState = "none" | "processing" | "unknown" | "sources_ready" | "
 /** Durable callbacks must persist state before allowing any external mutation. */
 export async function getLabelSources(request: Request, orderId: number, store: {
   state: LabelState; sources: string[] | null;
+  allowUnknownRetry?: boolean;
   claim: () => Promise<boolean>;
   saveSources: (sources: string[]) => Promise<void>;
   markUnknown: () => Promise<void>;
@@ -13,7 +14,7 @@ export async function getLabelSources(request: Request, orderId: number, store: 
   if (store.state === "sources_ready" && store.sources?.length) {
     store.sources.forEach(assertLabelUrl); return store.sources;
   }
-  if (store.state !== "none" || !await store.claim()) throw new Error("A geração desta etiqueta já está em andamento ou sem confirmação. Confira a etiqueta no painel de fretes do Omie antes de qualquer nova solicitação.");
+  if (!(store.state === "none" || (store.state === "unknown" && store.allowUnknownRetry === true)) || !await store.claim()) throw new Error("A geração desta etiqueta já está em andamento ou sem confirmação. Confira a etiqueta no painel de fretes do Omie antes de qualquer nova solicitação.");
   let response;
   try { response = await request<{ cCodStatus?: string; cDesStatus?: string; listaEtiqueta?: { cUrlEtiqueta?: string }[] }>("/produtos/frete/", "GerarEtiqueta", { nIdPedido: orderId }); }
   catch (error) {

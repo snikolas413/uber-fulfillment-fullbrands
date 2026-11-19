@@ -61,6 +61,14 @@ com os Correios. Falhas dessa integração são apresentadas ao operador.
   automática e a interface orienta conferir o painel de fretes.
 - Uma recusa explícita do Omie permite nova ação manual. Resposta incompleta ou
   aceitação sem confirmação local mantém a proteção contra repetição.
+- Para `unknown`, o botão **Conferir e repetir etiqueta** permite uma nova tentativa
+  somente após confirmação explícita do operador. A ação reconfere NF-e, vínculo,
+  transportadora, rastreio e volumes no Omie, e reserva atomicamente a versão da
+  tentativa anterior (`label_requested_at`). A autorização fica na auditoria.
+  Chamadas concorrentes não reutilizam essa autorização. `processing` permanece
+  bloqueado; o lote automático nunca autoriza repetição de uma etiqueta incerta.
+  Essa ação chama apenas a geração da etiqueta; não gera frete nem fatura novamente.
+  Se o resultado continuar incerto, exige uma nova conferência e autorização manual.
 - Os links recebidos são salvos antes de baixar/montar arquivos. `sources_ready`
   retoma somente a montagem/download, sem repetir `GerarEtiqueta`.
 - URLs de arquivos e redirecionamentos precisam usar HTTPS em domínio Omie ou

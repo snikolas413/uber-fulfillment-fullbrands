@@ -189,9 +189,11 @@ test('falha fiscal salva aviso no pedido e auditoria, devolvendo a pausa sem ger
 });
 
 test('fluxo completo salva original e PDF combinado, confirma NF local e reimprime sem nova geração', async () => {
+  for (const mode of [false, true, 'wrongTracking', 'busy', 'claimChanged']) {
+  const retryUnknown = mode !== false;
   const id = '11111111-1111-4111-8111-111111111111';
   const row = { id, status: 'billing_pending', omie_order_id: 1 };
-  const shipment = { label_generation_state: 'none', label_source_urls: null, label_invoice_key: null, label_storage_path: null, package_count: 1, service_code: '04227', carrier_id: '2757271756', label_last_error: 'Erro anterior', label_error_at: '2026-11-11' };
+  const shipment = { label_generation_state: mode === 'busy' ? 'processing' : retryUnknown ? 'unknown' : 'none', label_requested_at: retryUnknown ? '2026-11-18T22:00:00Z' : null, tracking_code: 'AV096096192BR', label_source_urls: null, label_invoice_key: null, label_storage_path: null, package_count: 1, service_code: '04227', carrier_id: '2757271756', label_last_error: 'Erro anterior', label_error_at: '2026-11-11' };
   const savedInvoice = {};
   const blobs = new Map();
   const operations = [];
@@ -208,8 +210,10 @@ test('fluxo completo salva original e PDF combinado, confirma NF local e reimpri
         update(value) { patch = value; return q; },
         async upsert(value) { if (table === 'invoices') Object.assign(savedInvoice, value); return { error: null }; },
         async insert() { return { error: null }; },
-        async maybeSingle() { if (table === 'user_profiles') return { data: { is_active: true, role: 'operador' } }; if (patch) { apply(); return { data: { id: 'shipment' } }; } return { data: target }; },
-        async single() { return { data: target }; }, then(resolve) { return Promise.resolve(apply()).then(resolve); },
+        async maybeSingle() { if (table === 'user_profiles') return { data: { is_active: true, role: 'operador' } }; if (patch) {
+          if (!filters.every(([key, value]) => key === 'fulfillment_id' || key === 'id' || target[key] === value)) return { data: null };
+          apply(); return { data: { id: 'shipment' } }; } return { data: target }; },
+        async single() { return { data: structuredClone(target) }; }, then(resolve) { return Promise.resolve(apply()).then(resolve); },
       }; return q;
     },
   };
@@ -222,12 +226,24 @@ test('fluxo completo salva original e PDF combinado, confirma NF local e reimpri
   const actions = load('../src/app/expedicao/label-actions.ts', {
     'next/cache': { revalidatePath() {} }, '@/lib/supabase/server': { createSupabaseServerClient: async () => db },
     '@/lib/supabase/admin': { createSupabaseAdminClient() { assert.fail('Expedição deve usar a sessão do operador, sem chave administrativa'); } },
-    '@/lib/omie/client': { async callOmie(endpoint, method) { operations.push(method); assert.equal(method, 'GerarEtiqueta'); return { cCodStatus: '0', listaEtiqueta: [{ cUrlEtiqueta: 'https://cdn.omie.com.br/label.pdf' }] }; } },
+    '@/lib/omie/client': { async callOmie(endpoint, method) {
+      operations.push(method);
+      if (retryUnknown && method === 'ConsultarPedido') {
+        if (mode === 'claimChanged') shipment.label_requested_at = '2026-11-19T12:00:00Z';
+        return { pedido_venda_produto: {
+        cabecalho: { codigo_pedido: 1, codigo_pedido_integracao: 'UFB-' + id.replaceAll('-', '') },
+        infoCadastro: { cancelado: 'N', faturado: 'S' }, frete: { codigo_transportadora: 2757271756, codigo_rastreio: mode === 'wrongTracking' ? 'OUTRO' : 'AV096096192BR', quantidade_volumes: 1 },
+      } }; }
+      assert.equal(method, 'GerarEtiqueta'); return { cCodStatus: '0', listaEtiqueta: [{ cUrlEtiqueta: 'https://cdn.omie.com.br/label.pdf' }] };
+    } },
     '@/lib/omie/shipping-invoice': { readShippingInvoice: async () => invoice },
     '@/lib/omie/label-download': { downloadOmieLabel: async () => source }, '@/lib/omie/shipping-label-pdf': pdf,
     '@/lib/omie/generate-shipping-label': generation, '@/lib/omie/freight-selection': { isMiniEnviosName: () => false },
   });
-  const first = await actions.generateShippingLabelAction(id, true);
+  const first = await actions.generateShippingLabelAction(id, true, retryUnknown);
+  if (typeof mode === 'string') {
+    assert.equal(first.status, 'error'); assert.ok(!operations.includes('GerarEtiqueta')); assert.equal(blobs.size, 0); continue;
+  }
   assert.equal(first.status, 'success', first.message);
   assert.equal(first.url, `/api/expedicao/${id}/etiqueta`);
   assert.equal(shipment.label_generation_state, 'ready'); assert.equal(row.status, 'label_ready');
@@ -235,7 +251,24 @@ test('fluxo completo salva original e PDF combinado, confirma NF local e reimpri
   assert.equal(savedInvoice.access_key, key); assert.equal(savedInvoice.status, '006');
   assert.equal(blobs.size, 2);
   assert.equal((await actions.generateShippingLabelAction(id, true)).status, 'success');
-  assert.deepEqual(operations, ['GerarEtiqueta']);
+  assert.deepEqual(operations, retryUnknown ? ['ConsultarPedido', 'GerarEtiqueta'] : ['GerarEtiqueta']);
+  }
+});
+
+test('repetição de etiqueta incerta exige autorização específica e mantém uma só reserva concorrente', async () => {
+  let state = 'unknown', calls = 0;
+  const saved = () => ({ state: 'unknown', sources: null,
+    async claim() { if (state !== 'unknown') return false; state = 'processing'; return true; },
+    async saveSources() { state = 'sources_ready'; }, async markUnknown() { state = 'unknown'; }, async markRejected() { state = 'none'; },
+  });
+  const request = async () => { calls++; return { cCodStatus: '0', listaEtiqueta: [{ cUrlEtiqueta: 'https://cdn.omie.com.br/label.pdf' }] }; };
+  await assert.rejects(generation.getLabelSources(request, 123, saved()));
+  assert.equal(calls, 0);
+  const results = await Promise.allSettled([1, 2].map(() => generation.getLabelSources(request, 123, { ...saved(), allowUnknownRetry: true })));
+  assert.equal(calls, 1); assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+  state = 'processing';
+  await assert.rejects(generation.getLabelSources(request, 123, { ...saved(), state: 'processing', allowUnknownRetry: true }));
+  assert.equal(calls, 1);
 });
 
 test('download usa Storage autenticado e exige sessão, NF consistente e caminho do pedido', async () => {
