@@ -24,6 +24,7 @@ function harness(options={}){
   const request=async(endpoint,method,params)=>{
     calls.push({method,params});
     if(method==='ListarEtapasFaturamento')return{cadastros:options.config??config,total_de_paginas:1};
+    if(method==='ConsultarPedido')return{pedido_venda_produto:{cabecalho:{codigo_pedido:options.wrongId?999:123,codigo_pedido_integracao:integration,etapa:stage},infoCadastro:{cancelado:options.cancelled?'S':'N',faturado:options.billed?'S':'N'}}};
     if(method==='StatusPedido')return{codigo_pedido:options.wrongId?999:123,codigo_pedido_integracao:integration,etapa:stage,cancelada:options.cancelled?'S':'N',faturada:options.billed?'S':'N',ListaNfe:[]};
     if(method==='TrocarEtapaPedido'){
       if(options.reject)return{codigo_status:'1',descricao_status:'Recusado'};
@@ -43,7 +44,7 @@ test('identifica separação pela configuração de venda e recusa etapas ambíg
 test('envio confirmado troca somente a etapa, reconfere e libera faturamento com auditoria',async()=>{
   const h=harness();assert.equal((await h.action(id,true)).status,'success');
   assert.equal(h.row.separation_state,'confirmed');assert.equal(h.row.status,'billing_pending');assert.ok(h.row.separation_confirmed_at);
-  assert.deepEqual(h.calls.map(c=>c.method),['ListarEtapasFaturamento','StatusPedido','TrocarEtapaPedido','StatusPedido']);
+  assert.deepEqual(h.calls.map(c=>c.method),['ListarEtapasFaturamento','ConsultarPedido','TrocarEtapaPedido','StatusPedido']);
   assert.equal(h.audits.at(-1).after_summary.no_invoice_requested,true);
   await h.action(id,true);assert.equal(h.calls.length,4);
 });

@@ -36,10 +36,20 @@ export async function sendToSeparationAction(id: string, confirmed = false) {
       if (saveError || !saved) throw new Error('O pedido mudou durante a conferência. Atualize a tela.');
       await db.from('fulfillments').update({omie_last_error:null}).eq('id',id).like('omie_last_error','Separação: %');
     };
-    const current = await read();
+    // Use distinct fresh read methods before/after the mutation so a normal
+    // batch does not wait 61 seconds for a duplicate StatusPedido query.
+    const { pedido_venda_produto: order } = await callOmie<{ pedido_venda_produto?: {
+      cabecalho?: { codigo_pedido?: number; codigo_pedido_integracao?: string; etapa?: string; bloqueado?: string; encerrado?: string };
+      infoCadastro?: { cancelado?: string; faturado?: string };
+    }}>('/produtos/pedido/','ConsultarPedido',{codigo_pedido:row.omie_order_id});
+    const current: SeparationSnapshot = { codigo_pedido:order?.cabecalho?.codigo_pedido,codigo_pedido_integracao:order?.cabecalho?.codigo_pedido_integracao,
+      etapa:order?.cabecalho?.etapa,cancelada:order?.infoCadastro?.cancelado,faturada:order?.infoCadastro?.faturado };
+    assertSeparationOrder(current,row.omie_order_id,integration);
+    if (order?.cabecalho?.bloqueado === 'S' || order?.cabecalho?.encerrado === 'S') throw new Error('Pedido bloqueado ou encerrado no Omie. Confira antes de enviar para separação.');
     const { data: invoice, error: invoiceError } = await db.from('invoices').select('status,access_key,omie_invoice_number,confirmation_state').eq('fulfillment_id',id).maybeSingle();
     if (invoiceError || (invoice && (invoice.status !== 'billing_rejected' || invoice.access_key || invoice.omie_invoice_number || invoice.confirmation_state !== 'none'))) throw new Error('Existe faturamento registrado ou em conferência. Atualize o pedido antes de enviar para separação.');
     if (current.etapa === target) {
+      if ((await read()).etapa !== target) throw new Error('A etapa mudou durante a conferência. Atualize o Omie.');
       await accept();
     } else {
       if (row.separation_state !== 'none') throw new Error('Envio em andamento ou sem confirmação. Apenas consulte novamente ou confira a etapa no Omie; o envio não será repetido.');
