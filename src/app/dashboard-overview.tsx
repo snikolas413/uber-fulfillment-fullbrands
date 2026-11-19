@@ -3,12 +3,13 @@ import { ArrowRight, ArrowUpRight, CheckCheck, ClipboardCheck, Clock3, FileText,
 import styles from "./dashboard.module.css";
 
 export type RecentDashboardOrder = {
+  label_printable?: boolean; billing_queue?: string; separation_queue?: string; shipping_queue?: string;
   delivery_recipient_name?: string | null;
   id: string; status: string; created_at: string; omie_order_number: string | null;
   recipients: { full_name: string } | { full_name: string }[] | null;
   invoices: { omie_invoice_number: string | null } | { omie_invoice_number: string | null }[] | null;
 };
-type Counts = { recipients: number | null; orders: number | null; billing: number | null; shipped: number | null };
+export type OverviewCounts = Record<'recipients'|'orders'|'prepared'|'separation'|'billing'|'confirming'|'billed'|'labels'|'shipping'|'attention'|'shipped'|'cancelled',number|null>;
 const first = <T,>(value: T | T[] | null) => Array.isArray(value) ? value[0] : value;
 const formatNumber = (value: number | null) => value === null ? "—" : new Intl.NumberFormat("pt-BR").format(value);
 const cleanNumber = (value: string) => value.replace(/^0+(?=\d)/, "");
@@ -21,21 +22,23 @@ const situations: Record<string, { label: string; tone: string }> = {
 };
 
 export function DashboardOverview({ counts, recentOrders, recentFailed, dataLoadFailed, updatedAt }: {
-  counts: Counts; recentOrders: RecentDashboardOrder[]; recentFailed: boolean; dataLoadFailed: boolean; updatedAt: string;
+  counts: OverviewCounts; recentOrders: RecentDashboardOrder[]; recentFailed: boolean; dataLoadFailed: boolean; updatedAt: string;
 }) {
   const metrics = [
     { label: "Destinatários", value: counts.recipients, note: "Motoristas na sua base", icon: Users, href: "/destinatarios", key: "recipients" },
-    { label: "Pedidos na operação", value: counts.orders, note: "Registros não cancelados", icon: Layers3, href: "/pedidos", key: "orders" },
-    { label: "Aguardando faturamento", value: counts.billing, note: "Fila registrada no Fulfillment", icon: ClipboardCheck, href: "/faturamento", key: "billing" },
-    { label: "Envios concluídos", value: counts.shipped, note: "Pedidos marcados como enviados", icon: PackageCheck, href: "/expedicao", key: "shipped" },
+    { label: "Pedidos não cancelados", value: counts.orders, note: "Todas as etapas da operação", icon: Layers3, href: "/pedidos?view=active", key: "orders" },
+    { label: "NF-e autorizadas", value: counts.billed, note: "Inclui pedidos que avançaram para expedição", icon: FileText, href: "/faturamento?view=billed", key: "billed" },
+    { label: "Etiquetas prontas", value: counts.labels, note: "PDF salvo e vinculado à nota autorizada", icon: PackageCheck, href: "/expedicao?view=ready", key: "labels" },
   ];
   const steps = [
-    { title: "Destinatários", description: "Cadastro e endereços de entrega", icon: Users, href: "/destinatarios" },
-    { title: "Pedidos", description: "Preparação e envio ao Omie", icon: Layers3, href: "/pedidos" },
-    { title: "Faturamento", description: "Emissão e acompanhamento da NF-e", icon: FileText, href: "/faturamento" },
-    { title: "Expedição", description: "Etiquetas, impressão e rastreamento", icon: Truck, href: "/expedicao" },
+    { title: "Enviar ao Omie", description: formatNumber(counts.prepared)+" preparados", icon: Layers3, href: "/pedidos" },
+    { title: "Separação", description: formatNumber(counts.separation)+" aguardando envio ou conferência", icon: PackageCheck, href: "/separacao" },
+    { title: "Faturamento", description: formatNumber(counts.billing)+" prontos · "+formatNumber(counts.confirming)+" aguardando NF-e", icon: FileText, href: "/faturamento" },
+    { title: "Expedição", description: formatNumber(counts.shipping)+" aguardando etiqueta · "+formatNumber(counts.labels)+" prontas", icon: Truck, href: "/expedicao" },
+    { title: "Postagem", description: formatNumber(counts.shipped)+" marcados como enviados", icon: Truck, href: "/expedicao?view=shipped" },
   ];
   const hasBilling = counts.billing !== null && counts.billing > 0;
+  const hasSeparation = (counts.separation??0)>0;
   const snapshot = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }).format(new Date(updatedAt));
 
   return <div className={styles.dashboard}>
@@ -55,8 +58,8 @@ export function DashboardOverview({ counts, recentOrders, recentFailed, dataLoad
 
     <section className={styles.focus} aria-label="Acompanhamento do faturamento">
       <span className={styles.focusIcon}>{hasBilling ? <ClipboardCheck size={21} /> : <CheckCheck size={21} />}</span>
-      <div><strong>{hasBilling ? `${formatNumber(counts.billing)} ${counts.billing === 1 ? "pedido na fila de faturamento" : "pedidos na fila de faturamento"}` : "Cada etapa da operação, no seu lugar"}</strong><p>{hasBilling ? "Confira os pedidos e acompanhe a emissão das notas fiscais no módulo de faturamento." : "Use os módulos ao lado para acompanhar cadastros, pedidos, notas e etiquetas."}</p></div>
-      <Link href="/faturamento">Ver faturamento <ArrowRight size={16} /></Link>
+      <div><strong>{hasSeparation?`${formatNumber(counts.separation)} pedidos aguardando separação`:hasBilling?`${formatNumber(counts.billing)} pedidos prontos para faturar`:'Acompanhe a próxima etapa da operação'}</strong><p>{formatNumber(counts.attention)} pedido(s) com aviso para conferência · {formatNumber(counts.cancelled)} cancelado(s). Os indicadores refletem a base local; não fazem nova consulta ao Omie.</p></div>
+      <Link href={hasSeparation?'/separacao':'/faturamento'}>Abrir fila <ArrowRight size={16} /></Link>
     </section>
 
     <div className={styles.mainGrid}>
@@ -67,7 +70,7 @@ export function DashboardOverview({ counts, recentOrders, recentFailed, dataLoad
           <tbody>{recentOrders.map(order => {
             const recipient = order.delivery_recipient_name ?? first(order.recipients)?.full_name ?? "Destinatário indisponível";
             const invoice = first(order.invoices)?.omie_invoice_number;
-            const status = situations[order.status] ?? { label: "Em acompanhamento", tone: "neutral" };
+            const status = order.status==='cancelled'?situations.cancelled:order.shipping_queue==='shipped'?situations.shipped:order.label_printable?situations.label_ready:order.separation_queue&&order.separation_queue!=='confirmed'?situations.order_created:order.billing_queue==='confirming'?{label:'Aguardando NF-e',tone:'amber'}:order.billing_queue==='attention'?{label:'Conferir pendência',tone:'red'}:order.label_printable===false&&order.status==='label_ready'?{label:'Conferir etiqueta',tone:'amber'}:situations[order.status] ?? { label: "Em acompanhamento", tone: "neutral" };
             const created = new Date(order.created_at);
             const validDate = !Number.isNaN(created.getTime());
             return <tr key={order.id}>
@@ -82,7 +85,7 @@ export function DashboardOverview({ counts, recentOrders, recentFailed, dataLoad
       </section>
 
       <aside className={styles.workflow} aria-label="Acessos aos módulos da operação">
-        <span className={styles.workflowKicker}>DO INÍCIO AO FIM</span><h2>Uma operação. Quatro etapas.</h2><p className={styles.workflowLead}>Acesse o ponto do fluxo que você precisa acompanhar.</p>
+        <span className={styles.workflowKicker}>PRÓXIMOS PASSOS</span><h2>Filas da operação</h2><p className={styles.workflowLead}>Abra uma etapa para acompanhar os pedidos e suas pendências.</p>
         <nav aria-label="Etapas da operação">{steps.map(({ title, description, icon: Icon, href }, index) => <Link key={href} href={href} className={styles.workflowStep}>
           <span className={styles.stepIndex}>0{index + 1}</span><span className={styles.stepIcon}><Icon size={18} strokeWidth={1.7} /></span><span className={styles.stepCopy}><strong>{title}</strong><small>{description}</small></span><ArrowUpRight size={16} className={styles.workflowArrow} />
         </Link>)}</nav>

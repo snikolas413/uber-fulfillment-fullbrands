@@ -1,2 +1,14 @@
-import { Settings2 } from "lucide-react"; import { ModulePage } from "@/components/module-page";
-export default function Page() { return <ModulePage eyebrow="SISTEMA" title="Configurações" lead="Gerencie conexões, parâmetros operacionais e permissões de acesso." icon={<Settings2 size={20}/>} message="As credenciais serão configuradas no ambiente seguro do servidor. Nenhuma chave de API deve ser cadastrada ou exibida no navegador."/>; }
+import { redirect } from 'next/navigation';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+export const dynamic='force-dynamic';
+export default async function ConfigurationPage(){
+  const db=await createSupabaseServerClient();const {data:auth,error:authError}=await db.auth.getUser();if(authError||!auth.user)redirect('/login');
+  const {data:profile}=await db.from('user_profiles').select('role,is_active').eq('id',auth.user.id).maybeSingle();if(!profile?.is_active)redirect('/acesso-negado');
+  const {data:last,error}=await db.from('fulfillments').select('omie_last_sync_at').not('omie_last_sync_at','is',null).order('omie_last_sync_at',{ascending:false}).limit(1);
+  const omieConfigured=Boolean(process.env.OMIE_APP_HASH&&(process.env.OMIE_APP_KEY&&process.env.OMIE_APP_SECRET||process.env.OMIE_ACCESS_TOKEN));
+  const synced=last?.[0]?.omie_last_sync_at;
+  return <div><section className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line"/>SISTEMA</div><h1>Configurações</h1><p className="page-lead">Consulte as integrações e as regras utilizadas pela operação.</p></div><span className="history-access">Somente consulta</span></section>
+    <div className="configuration-grid"><section className="panel configuration-panel"><h2>Integrações</h2><dl><dt>Base operacional</dt><dd><span className="order-status order-status-label_ready">Acesso confirmado</span></dd><dt>Omie</dt><dd>{omieConfigured?'Credenciais configuradas no servidor':'Conferir configuração no servidor'}</dd><dt>Última sincronização registrada</dt><dd>{error?'Consulta indisponível':synced?new Intl.DateTimeFormat('pt-BR',{dateStyle:'short',timeStyle:'short',timeZone:'America/Sao_Paulo'}).format(new Date(synced)):'Sem sincronização registrada'}</dd></dl><p>A configuração detectada não substitui a confirmação do resultado de cada operação no Omie.</p></section>
+    <section className="panel configuration-panel"><h2>Regras operacionais</h2><dl><dt>Fluxo</dt><dd>Pedidos → Separação → Faturamento → Expedição</dd><dt>Transportadora e serviço</dt><dd>Correios · Mini Envios · Frete grátis</dd><dt>Etiqueta</dt><dd>100 × 150 mm, com dados e chave da NF-e</dd><dt>Limite por lote</dt><dd>Até 100 pedidos selecionados</dd><dt>Faturamento</dt><dd>Confirmação obrigatória, sem contas a receber nem boleto</dd><dt>Seu perfil</dt><dd>{({admin:'Administrador',gestor:'Gestor',operador:'Operador',consulta:'Consulta'} as Record<string,string>)[profile.role]??'Consulta'}</dd></dl></section></div>
+    <details className="screen-help"><summary>Proteções da operação</summary><p>Resultados incertos exigem conferência antes de uma nova tentativa. A separação, as validações fiscais e de frete e as reservas contra duplicidade continuam obrigatórias. As credenciais e permissões não são alteradas por esta tela.</p></details></div>;
+}

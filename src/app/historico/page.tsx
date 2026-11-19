@@ -1,108 +1,34 @@
-import { redirect } from "next/navigation";
-import { Activity, Clock3, FileText, MapPin, Package, ShieldCheck } from "lucide-react";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
-
-export const dynamic = "force-dynamic";
-
-type AuditEntry = {
-  id: string;
-  entity_type: string;
-  entity_id: string | null;
-  action: string;
-  after_summary: Record<string, unknown> | null;
-  source: string;
-  created_at: string;
-};
-
-function describeAction(entry: AuditEntry) {
-  const details = entry.after_summary ?? {};
-  if (entry.action === "recipient.created") return "Novo destinatário cadastrado";
-  if (entry.action === "recipient.updated") {
-    const addressChanged = details.address_version_created === true;
-    const contactChanged = details.contact_changed === true;
-    if (addressChanged && contactChanged) return "Dados de contato atualizados e nova versão de endereço criada";
-    if (addressChanged) return "Nova versão de endereço criada";
-    if (contactChanged) return "Dados de contato atualizados";
-    return "Cadastro de destinatário revisado";
-  }
-  if (entry.action === "fulfillment.prepared") {
-    const product = typeof details.product_code === "string" ? details.product_code : "Item";
-    const quantity = typeof details.quantity === "number" ? details.quantity : 1;
-    return `Preparação de pedido criada · ${product} · ${quantity} unidade(s)`;
-  }
-  return entry.action.replaceAll(".", " ");
-}
-
-function entityLabel(type: string) {
-  if (type === "recipient") return "Destinatário";
-  if (type === "fulfillment") return "Pedido";
-  return type;
-}
-
-function formatDate(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "Data indisponível"
-    : new Intl.DateTimeFormat("pt-BR", { dateStyle: "medium", timeStyle: "short" }).format(date);
-}
-
-export default async function HistoryPage() {
-  const supabase = await createSupabaseServerClient();
-  const { data: authData, error: authError } = await supabase.auth.getUser();
-  if (authError || !authData.user) redirect("/login");
-
-  const { data: profile, error: profileError } = await supabase
-    .from("user_profiles")
-    .select("role, is_active")
-    .eq("id", authData.user.id)
-    .maybeSingle();
-
-  if (profileError || !profile?.is_active) redirect("/acesso-negado");
-  if (!["admin", "gestor"].includes(profile.role)) redirect("/acesso-negado");
-
-  const { data, error } = await supabase
-    .from("audit_logs")
-    .select("id, entity_type, entity_id, action, after_summary, source, created_at")
-    .order("created_at", { ascending: false })
-    .limit(100);
-
-  const events = (data ?? []) as unknown as AuditEntry[];
-
-  return (
-    <div className="history-page">
-      <section className="welcome-row">
-        <div><div className="eyebrow"><span className="eyebrow-line" /> CONTROLE E RASTREABILIDADE</div><h1>Histórico</h1><p className="page-lead">Registro cronológico das alterações realizadas na operação.</p></div>
-        <span className="history-access"><ShieldCheck size={14} /> Acesso de gestão</span>
-      </section>
-
-      <section className="history-summary">
-        <article className="recipient-stat"><span className="recipient-stat-icon"><Activity size={17} /></span><div><strong>{events.length}</strong><small>Eventos recentes</small></div></article>
-        <article className="recipient-stat"><span className="recipient-stat-icon"><FileText size={17} /></span><div><strong>{events.filter((event) => event.entity_type === "recipient").length}</strong><small>Alterações cadastrais</small></div></article>
-        <article className="recipient-stat"><span className="recipient-stat-icon"><Package size={17} /></span><div><strong>{events.filter((event) => event.entity_type === "fulfillment").length}</strong><small>Preparações de pedidos</small></div></article>
-      </section>
-
-      <section className="panel history-panel">
-        <div className="recipient-toolbar"><div><span className="section-kicker">AUDITORIA DO SISTEMA</span><h2>Últimas movimentações</h2></div><span className="history-limit">Últimos 100 eventos</span></div>
-        {error ? (
-          <div className="recipient-alert recipient-alert-error">Não foi possível consultar o histórico. Confira a conexão e as permissões de auditoria.</div>
-        ) : events.length ? (
-          <div className="history-list">
-            {events.map((event) => (
-              <article className="history-event" key={event.id}>
-                <span className={`history-event-icon history-event-${event.entity_type}`}>{event.entity_type === "recipient" ? <MapPin size={16} /> : <Package size={16} />}</span>
-                <div className="history-event-main">
-                  <strong>{describeAction(event)}</strong>
-                  <div className="history-event-meta"><span>{entityLabel(event.entity_type)}</span><span>·</span><span>{event.entity_id ? `ID …${event.entity_id.slice(-8)}` : "Sem identificador"}</span><span>·</span><span>{event.source === "application" ? "Aplicação" : event.source}</span></div>
-                </div>
-                <time><Clock3 size={12} />{formatDate(event.created_at)}</time>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <div className="recipient-empty"><span className="recipient-empty-icon"><Activity size={24} /></span><strong>Nenhuma movimentação registrada</strong><p>Os cadastros e preparações realizados pela aplicação aparecerão aqui, com data e identificação da entidade.</p></div>
-        )}
-      </section>
-      <p className="history-footnote">A consulta é somente leitura. O sistema não permite alterar ou apagar registros de auditoria por esta tela.</p>
-    </div>
-  );
+import { redirect } from 'next/navigation';
+import Link from 'next/link';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { auditDescription } from '@/lib/audit-labels';
+import { cleanNumber } from '@/lib/operations-list';
+import { OperationNotice } from '@/components/operation-notice';
+export const dynamic='force-dynamic';
+type Entry={id:string;entity_id:string|null;entity_type:string;action:string;after_summary:Record<string,unknown>|null;created_at:string};
+const views={all:'Todas as movimentações',errors:'Erros registrados',billing:'Faturamento',labels:'Etiquetas',separation:'Separação',recipients:'Cadastros'};
+function day(value:unknown){return typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)&&Number.isFinite(Date.parse(value))?value:'';}
+export default async function HistoryPage({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}){
+  const db=await createSupabaseServerClient();const {data:auth,error:authError}=await db.auth.getUser();if(authError||!auth.user)redirect('/login');
+  const {data:profile}=await db.from('user_profiles').select('role,is_active').eq('id',auth.user.id).maybeSingle();if(!profile?.is_active||!['admin','gestor'].includes(profile.role))redirect('/acesso-negado');
+  const params=await searchParams,view=typeof params.view==='string'&&params.view in views?params.view:'all';
+  const from=day(params.from),to=day(params.to),requested=typeof params.page==='string'&&/^\d{1,7}$/.test(params.page)?Math.max(1,Number(params.page)):1;
+  const query=(page:number,head=false)=>{let q=db.from('audit_logs').select(head?'id':'id,entity_id,entity_type,action,after_summary,created_at',{count:'exact',head});
+    if(view==='errors')q=q.ilike('action','%failed%');if(view==='billing')q=q.ilike('action','omie.invoice.%');if(view==='labels')q=q.ilike('action','shipping.%');if(view==='separation')q=q.ilike('action','omie.separation.%');if(view==='recipients')q=q.eq('entity_type','recipient');
+    if(from)q=q.gte('created_at',from+'T00:00:00-03:00');if(to){const next=new Date(to+'T12:00:00Z');next.setUTCDate(next.getUTCDate()+1);q=q.lt('created_at',next.toISOString().slice(0,10)+'T00:00:00-03:00');}
+    return head?q:q.order('created_at',{ascending:false}).order('id',{ascending:false}).range((page-1)*100,page*100-1);};
+  let result=await query(requested);const total=result.error?.code==='PGRST103'?(await query(1,true)).count:result.count;
+  const pages=Math.max(1,Math.ceil((total??0)/100)),page=Math.min(requested,pages);if(page!==requested)result=await query(page);
+  const entries=(result.data??[]) as unknown as Entry[];
+  const ids=[...new Set(entries.filter(e=>e.entity_type==='fulfillment'&&e.entity_id).map(e=>e.entity_id!))];
+  const refs=ids.length?await db.from('operation_orders').select('id,omie_order_number,invoices').in('id',ids):{data:[]};
+  const lookup=new Map((refs.data??[]).map(row=>[row.id,row]));
+  const url=(next:number)=>'/historico?'+new URLSearchParams({view,from,to,page:String(next)});
+  return <div className="history-page"><section className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line"/>RASTREABILIDADE</div><h1>Histórico</h1><p className="page-lead">Consulte o que aconteceu em cada etapa da operação.</p></div></section>
+    <form className="queue-search history-filters" action="/historico"><label>Operação<select name="view" defaultValue={view}>{Object.entries(views).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label><label>De<input aria-label="Data inicial" type="date" name="from" defaultValue={from}/></label><label>Até<input aria-label="Data final" type="date" name="to" defaultValue={to}/></label><button className="primary-button">Filtrar</button><Link className="secondary-button" href="/historico">Limpar</Link></form>
+    <section className="panel"><div className="recipient-toolbar"><h2>Movimentações</h2><span>{result.error?'Consulta indisponível':(total??0)+' evento(s) no filtro'}</span></div>
+    {result.error?<div className="recipient-alert recipient-alert-error">Não foi possível consultar o histórico.</div>:entries.length?<div className="history-list">{entries.map(entry=>{const ref=lookup.get(entry.entity_id),invoice=ref?.invoices as {omie_invoice_number?:string}|null;const message=entry.after_summary?.message;
+      return <article className="history-event" key={entry.id}><div className="history-event-main"><strong>{auditDescription(entry.action)}</strong><div className="history-event-meta"><span>{ref?'Pedido #'+cleanNumber(ref.omie_order_number):entry.entity_type==='recipient'?'Destinatário':'Operação'}</span>{invoice?.omie_invoice_number&&<span>NF-e {cleanNumber(invoice.omie_invoice_number)}</span>}</div>{typeof message==='string'&&<OperationNotice message={message}/>}<details className="row-details"><summary>Detalhes do registro</summary><small>Evento: {entry.action} · Referência: {entry.entity_id??'Sistema'}</small></details></div><time>{new Intl.DateTimeFormat('pt-BR',{dateStyle:'short',timeStyle:'short',timeZone:'America/Sao_Paulo'}).format(new Date(entry.created_at))}</time></article>;
+    })}</div>:<div className="recipient-empty"><strong>Nenhuma movimentação neste filtro</strong></div>}
+    <div className="recipient-table-footer"><span>Até 100 eventos por página</span><nav className="order-list-pagination" aria-label="Páginas do histórico">{page>1&&<Link className="secondary-button" href={url(page-1)}>Anterior</Link>}<span>Página {page} de {pages}</span>{page<pages&&<Link className="secondary-button" href={url(page+1)}>Próxima</Link>}</nav></div></section></div>;
 }

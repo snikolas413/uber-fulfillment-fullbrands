@@ -20,15 +20,15 @@ const { BillingManagement } = load('../src/app/faturamento/billing-management.ts
   '@/components/omie-action-button': { OmieActionButton: ({ kind }) => React.createElement('button', { 'data-action': kind }, kind === 'confirm-manual-freight' ? 'Conferir ajuste no Omie' : 'Atualizar Omie') },
   '@/lib/omie/billing-batch': load('../src/lib/omie/billing-batch.ts'),
   '@/lib/omie/freight-selection': load('../src/lib/omie/freight-selection.ts'),
-  '@/lib/billing-list': load('../src/lib/billing-list.ts'),
+  '@/lib/operations-list': load('../src/lib/operations-list.ts'),
+  '@/components/operation-notice': load('../src/components/operation-notice.tsx'),
 });
-const list = { prepared: { page: 1, pageCount: 1, count: 0 }, pending: { page: 1, pageCount: 10, count: 1000 }, billed: { page: 1, pageCount: 1, count: 0 } };
 const base = { separation_state: 'confirmed', id: 'pedido-1', status: 'order_created', omie_order_id: 555, omie_order_number: '1140', omie_last_error: null,
   created_at: '2026-11-10T12:00:00Z', recipients: { full_name: 'Destinatário teste' }, invoices: null,
   shipments: { carrier_id: '123', service_code: '04227', freight_amount: 0 } };
 
 test('tela permite selecionar pedido preparado e bloqueia NF existente, tentativa incerta e frete pendente', () => {
-  const html = renderToStaticMarkup(React.createElement(BillingManagement, { canBill: true, list, rows: [base,
+  const html = renderToStaticMarkup(React.createElement(BillingManagement, { canBill: true, count: 1000, rows: [base,
     { ...base, id: 'pedido-2', omie_order_number: '1141', invoices: { status: 'billing_unknown' } },
     { ...base, id: 'pedido-3', omie_order_number: '1142', invoices: { omie_invoice_number: '123', status: 'faturada' } },
     { ...base, id: 'pedido-4', omie_order_number: '1143', omie_last_error: 'Frete: Pendente' },
@@ -38,20 +38,23 @@ test('tela permite selecionar pedido preparado e bloqueia NF existente, tentativ
   assert.ok(!inputs.find(input => input.includes('Selecionar pedido 1140')).includes('disabled'));
   for (const number of ['1141', '1142', '1143']) assert.ok(inputs.find(input => input.includes('Selecionar pedido ' + number)).includes('disabled'));
   assert.match(html, /Faturar selecionados/);
-  assert.match(html, /Pendentes: 4 de 1000 pedido/);
-  assert.match(html, /Página 1 de 10/);
-  assert.match(html, /Páginas de pedidos pendentes/);
+  assert.match(html, /1000 pedido\(s\) nesta fila/);
 });
 
 test('perfil consulta não recebe controles de seleção ou emissão', () => {
-  const html = renderToStaticMarkup(React.createElement(BillingManagement, { canBill: false, list, rows: [base] }));
+  const html = renderToStaticMarkup(React.createElement(BillingManagement, { canBill: false, count: 1000, rows: [base] }));
   assert.ok(!html.includes('type="checkbox"'));
   assert.ok(!html.includes('Faturar selecionados'));
   assert.match(html, /Atualizar Omie/);
 });
 
+test('aba de faturados mantém consulta sem seleção, botão de emissão ou data fiscal no dia anterior',()=>{
+ const html=renderToStaticMarkup(React.createElement(BillingManagement,{canBill:true,allowSubmission:false,count:90,rows:[{...base,status:'label_ready',invoices:{status:'006',omie_invoice_number:'00001303',access_key:'key',issued_at:'2026-11-18T00:00:00+00:00'}}]}));
+ assert.doesNotMatch(html,/Faturar selecionados|type="checkbox"/);assert.match(html,/18\/11\/2026/);assert.match(html,/>Faturado</);assert.doesNotMatch(html,/>Aguardando faturamento</);
+});
+
 test('conferir ajuste manual aparece só para operador com pendência de frete e sem emissão', () => {
-  const render = (canBill, row) => renderToStaticMarkup(React.createElement(BillingManagement, { canBill, list, rows: [row] }));
+  const render = (canBill, row) => renderToStaticMarkup(React.createElement(BillingManagement, { canBill, count: 1000, rows: [row] }));
   const blocked = { ...base, omie_last_error: 'Frete: Conferência pendente', shipments: null };
   assert.match(render(true, blocked), /Conferir ajuste no Omie/);
   assert.doesNotMatch(render(false, blocked), /Conferir ajuste no Omie/);

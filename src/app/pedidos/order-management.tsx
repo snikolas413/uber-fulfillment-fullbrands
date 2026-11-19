@@ -3,19 +3,21 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Plus, ClipboardList, Search, MapPin, Package, Clock3, CheckCircle,
-  AlertCircle, Send, LoaderCircle
+  Plus, ClipboardList, Search, Package, CheckCircle,
+  Send, LoaderCircle
 } from "lucide-react";
 import { OrderBatchModal } from "./order-batch-modal";
 import { OrderReviewEditor } from "./order-review-editor";
 import { OmieActionButton } from "@/components/omie-action-button";
+import { OperationNotice } from "@/components/operation-notice";
+import { cleanNumber } from "@/lib/operations-list";
 import { ShippingEditor } from "@/app/expedicao/shipping-editor";
 import { sendPreparedOrder } from "@/lib/omie/order-send-request";
 import { canSendPreparedOrder, runOrderSendBatch, type SendResult } from "@/lib/omie/order-send-batch";
 import { ORDER_PAGE_SIZE, type OrderListState, type OrderView } from "@/lib/order-list";
 
 const viewLabels: Record<OrderView, string> = {
-  pending: "Aguardando envio", sent: "Enviados ao Omie", review: "Revisar", cancelled: "Cancelados sem envio", all: "Todos",
+  pending: "Aguardando envio", sent: "Enviados ao Omie", review: "Revisar", cancelled: "Cancelados", active: "Não cancelados", all: "Todos",
 };
 
 type Address = {
@@ -172,14 +174,7 @@ export function OrderManagement({
         {canWrite && <button type="button" className="primary-button" disabled={sending} onClick={openNewDraft}><Plus size={17} /> Preparar pedido</button>}
       </section>
 
-      <section className="orders-notice">
-        <div className="orders-notice-icon"><AlertCircle size={17} /></div>
-        <div>
-          <strong>Integração Omie com ações controladas</strong>
-          <p>Prepare o pedido localmente e use “Enviar ao Omie” quando os dados estiverem conferidos. A ação cria um pedido real no ERP; faturamento e emissão da NF-e permanecem em uma etapa separada.</p>
-        </div>
-      </section>
-
+      <details className="screen-help"><summary>Como preparar e enviar pedidos</summary><p>Prepare o pedido, confira os dados e confirme o envio ao Omie. Depois, envie para Separação antes de faturar. Resultados incertos exigem conferência para evitar duplicidade.</p></details>
       <section className="orders-stats">
         <article className="recipient-stat"><span className="recipient-stat-icon"><ClipboardList size={17} /></span><div><strong>{list.totals.all}</strong><small>Preparações registradas</small></div></article>
         <article className="recipient-stat"><span className="recipient-stat-icon"><Package size={17} /></span><div><strong>{list.totals.pending}</strong><small>Aguardando envio ao Omie</small></div></article>
@@ -207,34 +202,31 @@ export function OrderManagement({
         {visibleDrafts.length ? (
           <div className="orders-table-wrap">
             <table className="orders-table">
-              <thead><tr>{canWrite && <th><input type="checkbox" aria-label="Selecionar pedidos preparados visíveis" checked={allVisibleSelected} disabled={sending || !visibleEligible.length} onChange={toggleVisible} /></th>}<th>DESTINATÁRIO</th><th>PRODUTO</th><th>REFERÊNCIA</th><th>ENDEREÇO</th><th>E-MAIL NF-E</th><th>TOTAL</th><th>STATUS</th><th>CRIADO EM</th><th>OMIE / FRETE</th></tr></thead>
+              <thead><tr>{canWrite && <th><input type="checkbox" aria-label="Selecionar pedidos preparados visíveis" checked={allVisibleSelected} disabled={sending || !visibleEligible.length} onChange={toggleVisible} /></th>}<th>DESTINATÁRIO</th><th>PRODUTO</th><th>TOTAL</th><th>SITUAÇÃO</th><th>DETALHES</th><th>AÇÕES</th></tr></thead>
               <tbody>
                 {visibleDrafts.map((draft) => {
                   const item = draft.fulfillment_items?.[0];
                   return (
                     <tr key={draft.id}>
                       {canWrite && <td><input type="checkbox" aria-label={`Selecionar pedido de ${draft.recipients?.full_name ?? draft.id}`} checked={selected.includes(draft.id)} disabled={sending || !eligible(draft) || (!selected.includes(draft.id) && selectedOrders.length >= 100)} onChange={event => setSelected(current => event.target.checked ? [...current, draft.id] : current.filter(id => id !== draft.id))} /></td>}
-                      <td><strong>{draft.delivery_recipient_name ?? draft.recipients?.full_name ?? "Destinatário indisponível"}</strong><small>{draft.omie_order_number ? `Omie #${draft.omie_order_number}` : "Ainda sem número Omie"}</small></td>
+                      <td><strong>{draft.delivery_recipient_name ?? draft.recipients?.full_name ?? "Destinatário indisponível"}</strong><small>{draft.omie_order_number ? `Omie #${cleanNumber(draft.omie_order_number)}` : "Ainda sem número Omie"}</small></td>
                       <td><strong>{item?.description ?? "Produto não informado"}</strong><small>{item?.product_code ?? "Sem código"} · {item?.quantity ?? 0} un.</small></td>
-                      <td>{draft.customer_purchase_order || "Não informada"}</td>
-                      <td><span className="orders-address"><MapPin size={12} />{draft.delivery_addresses ? `${draft.delivery_addresses.city}/${draft.delivery_addresses.state} · ${draft.delivery_addresses.postal_code}` : "Sem endereço"}</span></td>
-                      <td>{draft.customer_email || "Não informado"}</td>
                       <td><strong>{formatCurrency(Number(item?.line_total ?? Number(item?.quantity ?? 0) * Number(item?.unit_price ?? 0)))}</strong></td>
                       <td><span className={`order-status order-status-${draft.status}`}>{statusLabel(draft.status)}</span></td>
-                      <td><span className="orders-date"><Clock3 size={12} />{formatDate(draft.created_at)}</span></td>
+                      <td><details className="row-details"><summary>Ver detalhes</summary><dl><dt>Referência do cliente</dt><dd>{draft.customer_purchase_order||'Não informada'}</dd><dt>E-mail para NF-e</dt><dd>{draft.customer_email||'Não informado'}</dd><dt>Entrega</dt><dd>{draft.delivery_addresses?draft.delivery_addresses.city+'/'+draft.delivery_addresses.state+' · '+draft.delivery_addresses.postal_code:'Sem endereço'}</dd><dt>Preparado em</dt><dd>{formatDate(draft.created_at)}</dd></dl></details></td>
                       <td>
                         {canWrite && !draft.omie_order_id && ["order_pending", "error"].includes(draft.status) && <OrderReviewEditor fulfillmentId={draft.id} disabled={sending} />}
                         {activeIds.includes(draft.id) && <small role="status">Criando pedido e selecionando Mini Envios...</small>}
-                        {sendResults[draft.id] && <small role="status" className={`omie-action-result omie-action-result-${sendResults[draft.id].status}`}>{sendResults[draft.id].message}</small>}
+                        {sendResults[draft.id] && <OperationNotice message={sendResults[draft.id].message} status={sendResults[draft.id].status}/>}
                         {canWrite && !draft.omie_order_id && !sendResults[draft.id] && ["ready", "order_pending", "error"].includes(draft.status) && <OmieActionButton disabled={sending} fulfillmentId={draft.id} kind="send" size="small" />}
                         {canWrite && (["order_created", "billing_pending", "billed"].includes(draft.status) || sendResults[draft.id]) && <OmieActionButton disabled={sending} fulfillmentId={draft.id} kind="sync-order" size="small" />}
-                        {canWrite && !sending && draft.omie_order_id && ["order_created", "billing_pending"].includes(draft.status) && <>
+                        {canWrite && !sending && draft.omie_order_id && ["order_created", "billing_pending"].includes(draft.status) && <details className="row-details"><summary>Mais ações</summary>
                           {draft.omie_last_error?.startsWith("Frete: ") && <OmieActionButton fulfillmentId={draft.id} kind="select-mini" size="small" />}
                           {draft.omie_last_error?.startsWith("Frete: ") && <OmieActionButton fulfillmentId={draft.id} kind="confirm-manual-freight" size="small" />}
                           <ShippingEditor fulfillmentId={draft.id} current={(() => { const shipment = Array.isArray(draft.shipments) ? draft.shipments[0] : draft.shipments; return { carrierId: shipment?.carrier_id && /^\d+$/.test(shipment.carrier_id) ? Number(shipment.carrier_id) : null, packageCount: shipment?.package_count, freightAmount: shipment?.freight_amount, deliveryForecast: shipment?.estimated_delivery_date, modality: shipment?.service_modality }; })()} />
-                        </>}
+                        </details>}
                         {!canWrite && "Somente consulta"}
-                        {draft.omie_last_error && <small role="status" className="omie-action-result omie-action-result-warning">{draft.omie_last_error}</small>}
+                        {draft.omie_last_error && <OperationNotice message={draft.omie_last_error}/>}
                       </td>
                     </tr>
                   );

@@ -1,15 +1,16 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState, useCallback } from "react";
+import { useActionState, useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Search, Plus, Pencil, MapPin, Mail, Phone, FileText, Clock3,
+  Plus, Pencil, FileText,
   ChevronDown, ChevronUp, X, LoaderCircle, Users, MapPinned, ShieldCheck
 } from "lucide-react";
 import { saveRecipientAction, type RecipientActionState } from "./actions";
 import { RecipientImport } from "./recipient-import";
 import { RecipientExport } from "./recipient-export";
-import { matchesRecipientSearch } from "@/lib/recipient-report";
+import type { DirectoryState } from "@/lib/recipient-directory";
+import Link from "next/link";
 
 type Address = {
   id: string;
@@ -72,32 +73,20 @@ function latestAddress(recipient: Recipient) {
 export function RecipientManagement({
   recipients,
   canWrite,
-  loadError,
+  loadError, directory,
 }: {
-  recipients: Recipient[];
+  recipients: Recipient[]; directory: DirectoryState;
   canWrite: boolean;
   loadError?: string | null;
 }) {
   const router = useRouter();
-  const [search, setSearch] = useState("");
+  const search=directory.search;
   const [editing, setEditing] = useState<Recipient | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
-
-  const visibleRecipients = useMemo(() => {
-    return recipients.filter(recipient=>matchesRecipientSearch(recipient,search));
-  }, [recipients, search]);
-  const pageCount = Math.max(1, Math.ceil(visibleRecipients.length / 50));
-  const currentPage = Math.min(page, pageCount);
-  const pageRecipients = visibleRecipients.slice((currentPage - 1) * 50, currentPage * 50);
-
-  const addressCount = recipients.reduce((total, recipient) => total + (recipient.delivery_addresses?.length ?? 0), 0);
-  const validatedCount = recipients.reduce(
-    (total, recipient) => total + (recipient.delivery_addresses ?? []).filter((address) => address.validation_status === "valid").length,
-    0,
-  );
-
+  const visibleRecipients=recipients,pageRecipients=recipients;
+  const currentPage=directory.page,pageCount=directory.pageCount;
+  const pageUrl=(page:number)=>'/destinatarios?'+new URLSearchParams({q:search,page:String(page)});
   const openNew = () => {
     setEditing(null);
     setModalOpen(true);
@@ -122,25 +111,25 @@ export function RecipientManagement({
           <h1>Destinatários</h1>
           <p className="page-lead">Motoristas, contatos e endereços de entrega da operação Uber.</p>
         </div>
-        <div className="import-tools"><RecipientExport search={search}/>{canWrite && <><RecipientImport existingDocuments={recipients.map(recipient => recipient.document_number ?? "")} /><button type="button" className="primary-button" onClick={openNew}><Plus size={17} /> Novo destinatário</button></>}</div>
+        {canWrite&&<button type="button" className="primary-button" onClick={openNew}><Plus size={17} /> Novo destinatário</button>}
       </section>
-
+      <details className="screen-help"><summary>Importar ou exportar destinatários</summary><div className="import-tools"><RecipientExport search={search}/>{canWrite&&<RecipientImport existingDocuments={directory.documents}/>}</div></details>
       <section className="recipient-metrics">
-        <article className="recipient-stat"><span className="recipient-stat-icon"><Users size={17} /></span><div><strong>{recipients.length}</strong><small>Destinatários cadastrados</small></div></article>
-        <article className="recipient-stat"><span className="recipient-stat-icon"><MapPinned size={17} /></span><div><strong>{addressCount}</strong><small>Versões de endereço</small></div></article>
-        <article className="recipient-stat"><span className="recipient-stat-icon"><ShieldCheck size={17} /></span><div><strong>{validatedCount}</strong><small>Endereços validados</small></div></article>
+        <article className="recipient-stat"><span className="recipient-stat-icon"><Users size={17} /></span><div><strong>{directory.total}</strong><small>Destinatários cadastrados</small></div></article>
+        <article className="recipient-stat"><span className="recipient-stat-icon"><MapPinned size={17} /></span><div><strong>{directory.review}</strong><small>Revisão manual / inválidos</small></div></article>
+        <article className="recipient-stat"><span className="recipient-stat-icon"><ShieldCheck size={17} /></span><div><strong>{directory.validated}</strong><small>Endereços atuais validados</small></div></article>
       </section>
 
       <section className="panel recipient-panel">
         <div className="recipient-toolbar">
           <div><span className="section-kicker">CADASTRO INTERNO</span><h2>Base de motoristas</h2></div>
-          <label className="recipient-search"><Search size={16} /><input aria-label="Buscar destinatário" value={search} onChange={(event) => {setSearch(event.target.value);setPage(1);}} placeholder="Buscar por nome, CPF, telefone ou cidade" /></label>
+          <form action="/destinatarios" className="queue-search"><input name="q" aria-label="Buscar destinatário" defaultValue={search} placeholder="Nome, CPF, telefone ou cidade"/><button className="secondary-button">Buscar</button>{search&&<Link className="secondary-button" href="/destinatarios">Limpar</Link>}</form>
         </div>
         {loadError && <div className="recipient-alert recipient-alert-error">{loadError}</div>}
         {visibleRecipients.length > 0 ? (
           <div className="recipient-table-wrap">
             <table className="recipient-table">
-              <thead><tr><th>DESTINATÁRIO</th><th>CONTATO</th><th>ENDEREÇO MAIS RECENTE</th><th>CADASTRO</th><th /></tr></thead>
+              <thead><tr><th>DESTINATÁRIO</th><th>CIDADE / UF</th><th>SITUAÇÃO DO ENDEREÇO</th><th>DETALHES</th><th /></tr></thead>
               <tbody>
                 {pageRecipients.map((recipient) => {
                   const currentAddress = latestAddress(recipient);
@@ -156,14 +145,11 @@ export function RecipientManagement({
                             <span className="recipient-avatar">{recipient.full_name.trim().slice(0, 1).toUpperCase() || "D"}</span>
                             <div><strong>{recipient.full_name}</strong><small><FileText size={12} /> {formatDocument(recipient.document_number)}</small></div>
                           </div>
-                          <div className="recipient-contact">
-                            {recipient.email ? <span><Mail size={12} />{recipient.email}</span> : <small>Sem e-mail informado</small>}
-                            {recipient.phone ? <span><Phone size={12} />{recipient.phone}</span> : <small>Sem telefone informado</small>}
-                          </div>
+                          <div className="recipient-contact">{currentAddress?currentAddress.city+"/"+currentAddress.state:"Sem endereço"}</div>
                           <div className="recipient-address">
-                            {currentAddress ? <><span><MapPin size={13} />{formatAddress(currentAddress)}</span><small className={`address-status address-status-${currentAddress.validation_status}`}>{currentAddress.validation_status === "valid" ? "Validado" : currentAddress.validation_status === "invalid" ? "Inválido" : currentAddress.validation_status === "manual_review" ? "Revisão manual" : "Pendente de validação"}</small></> : <small>Endereço não cadastrado</small>}
+                            {currentAddress ? <><small className={`address-status address-status-${currentAddress.validation_status}`}>{currentAddress.validation_status === "valid" ? "Validado" : currentAddress.validation_status === "invalid" ? "Inválido" : currentAddress.validation_status === "manual_review" ? "Revisão manual" : "Pendente de validação"}</small></> : <small>Endereço não cadastrado</small>}
                           </div>
-                          <div className="recipient-date"><Clock3 size={12} />{formatDate(recipient.created_at)}</div>
+                          <div className="recipient-date"><button type="button" className="secondary-button" onClick={()=>setExpandedHistory(historyOpen?null:recipient.id)}>{historyOpen?"Fechar":"Ver detalhes"}</button></div>
                           <div className="recipient-actions">
                             {canWrite && <button type="button" className="icon-action" onClick={() => openEdit(recipient)} aria-label={`Editar ${recipient.full_name}`} title="Editar"><Pencil size={15} /></button>}
                             <button type="button" className="icon-action" onClick={() => setExpandedHistory(historyOpen ? null : recipient.id)} aria-label="Ver histórico de endereços" title="Histórico de endereços">{historyOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
@@ -171,7 +157,7 @@ export function RecipientManagement({
                         </div>
                         {historyOpen && (
                           <div className="address-history">
-                            <strong>Histórico de endereços</strong>
+                            <strong>Contato e endereços</strong><p>{recipient.email||"Sem e-mail"} · {recipient.phone||"Sem telefone"}</p><small>Cadastrado em {formatDate(recipient.created_at)}</small>
                             {addresses.length ? addresses.map((address, index) => (
                               <div className="address-history-item" key={address.id}>
                                 <span className="address-history-index">{index === 0 ? "ATUAL" : `V${addresses.length - index}`}</span>
@@ -196,9 +182,7 @@ export function RecipientManagement({
             {!search && canWrite && <button type="button" className="secondary-button" onClick={openNew}><Plus size={15} /> Cadastrar primeiro destinatário</button>}
           </div>
         )}
-        <div className="recipient-table-footer"><span>{visibleRecipients.length} de {recipients.length} destinatário(s) · 50 por página</span><nav className="order-list-pagination" aria-label="Páginas de destinatários">
-          <button type="button" className="secondary-button" disabled={currentPage<=1} onClick={()=>setPage(currentPage-1)}>Anterior</button><span>Página {currentPage} de {pageCount}</span><button type="button" className="secondary-button" disabled={currentPage>=pageCount} onClick={()=>setPage(currentPage+1)}>Próxima</button>
-        </nav></div>
+        <div className="recipient-table-footer"><span>{directory.count} resultado(s) de {directory.total} destinatários · 50 por página</span><nav className="order-list-pagination" aria-label="Páginas de destinatários">{currentPage>1&&<Link className="secondary-button" href={pageUrl(currentPage-1)}>Anterior</Link>}<span>Página {currentPage} de {pageCount}</span>{currentPage<pageCount&&<Link className="secondary-button" href={pageUrl(currentPage+1)}>Próxima</Link>}</nav></div>
       </section>
 
       {modalOpen && (

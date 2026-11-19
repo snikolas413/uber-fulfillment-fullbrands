@@ -20,6 +20,7 @@ function database(rows) {
       for (const [field, expression] of url.searchParams) {
         if (field === 'status') {
           if (expression.startsWith('eq.')) filtered = filtered.filter(row => row.status === expression.slice(3));
+          if (expression.startsWith('neq.')) filtered = filtered.filter(row => row.status !== expression.slice(4));
           if (expression === 'not.in.(ready,cancelled)') filtered = filtered.filter(row => !['ready', 'cancelled'].includes(row.status));
         }
         if (field === 'omie_order_id') filtered = filtered.filter(row => expression === 'is.null' ? row.omie_order_id === null : row.omie_order_id !== null);
@@ -48,7 +49,7 @@ test('174 pedidos preparados ficam acessíveis em duas páginas sem repetição 
   assert.equal(first.data.length, 100);
   assert.equal(second.data.length, 74);
   assert.equal(new Set([...first.data, ...second.data].map(row => row.id)).size, 174);
-  assert.deepEqual(second.state.totals, { pending: 174, sent: 0, review: 0, cancelled: 0, all: 174 });
+  assert.deepEqual(second.state.totals, { pending: 174, sent: 0, review: 0, cancelled: 0, active:174, all: 174 });
 });
 
 test('paginação alcança mais de 1000 pedidos e ajusta página que deixou de existir após envio', async () => {
@@ -71,7 +72,9 @@ test('filtros separam ID Omie confirmado, preparados, tentativas incertas e canc
   const sent = await loadOrderList(client, orderListParams({ view: 'sent' }));
   assert.equal(sent.data.length, 6);
   assert.ok(sent.data.every(row => row.omie_order_id));
-  assert.deepEqual(sent.state.totals, { pending: 174, sent: 6, review: 2, cancelled: 1, all: 183 });
+  assert.deepEqual(sent.state.totals, { pending: 174, sent: 6, review: 2, cancelled: 2, active:181, all: 183 });
+  const cancelled=await loadOrderList(client,orderListParams({view:'cancelled'}));
+  assert.equal(cancelled.data.length,2);assert.ok(cancelled.data.some(row=>row.omie_order_id));
   const review = await loadOrderList(client, orderListParams({ view: 'review' }));
   assert.deepEqual(review.data.map(row => row.id), ['order_pending', 'error']);
 });

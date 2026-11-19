@@ -83,6 +83,8 @@ test('lista mostra seleção e botão de lote só para escrita; abrir página n�
     'next/navigation': { useRouter: () => ({ refresh() {} }) },
     './order-batch-modal': { OrderBatchModal: () => null },
     './order-review-editor': { OrderReviewEditor: ({ fulfillmentId }) => React.createElement('button', { 'data-review': fulfillmentId }, 'Editar pedido') },
+    '@/lib/operations-list': { cleanNumber: value => value?.replace(/^0+(?=\d)/,'')||'—' },
+    '@/components/operation-notice': { OperationNotice: ({message})=>React.createElement('details',null,message) },
     '@/components/omie-action-button': { OmieActionButton: () => null },
     '@/app/expedicao/shipping-editor': { ShippingEditor: () => null },
     '@/lib/omie/order-send-request': { sendPreparedOrder() { assert.fail('Renderização não pode enviar'); } },

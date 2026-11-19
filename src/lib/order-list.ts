@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const ORDER_PAGE_SIZE = 100;
-export const ORDER_VIEWS = ["pending", "sent", "review", "cancelled", "all"] as const;
+export const ORDER_VIEWS = ["pending", "sent", "review", "cancelled", "active", "all"] as const;
 export type OrderView = typeof ORDER_VIEWS[number];
 export type OrderTotals = Record<OrderView, number>;
 export type OrderListState = {
@@ -26,7 +26,8 @@ export function orderListQuery(client: SupabaseClient, view: OrderView, search =
   if (view === "pending") query = query.eq("status", "ready").is("omie_order_id", null);
   if (view === "sent") query = query.not("omie_order_id", "is", null);
   if (view === "review") query = query.is("omie_order_id", null).not("status", "in", "(ready,cancelled)");
-  if (view === "cancelled") query = query.is("omie_order_id", null).eq("status", "cancelled");
+  if (view === "cancelled") query = query.eq("status", "cancelled");
+  if (view === "active") query = query.neq("status", "cancelled");
   if (search && !head) {
     query = query.ilike("matching_recipient.full_name", `%${search}%`)
       .ilike("matching_item.product_code", `%${search}%`)

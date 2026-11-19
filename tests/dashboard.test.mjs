@@ -16,7 +16,7 @@ const view = load('../src/app/dashboard-overview.tsx', {
   'next/link': props => React.createElement('a', props, props.children),
   './dashboard.module.css': { __esModule: true, default: new Proxy({}, { get: (_, name) => String(name) }) },
 });
-const base = { counts: { recipients: 12, orders: 8, billing: 2, shipped: 1 }, recentOrders: [], recentFailed: false, dataLoadFailed: false, updatedAt: '2026-11-11T17:30:00Z' };
+const base = { counts: { recipients: 12, orders: 8, billing: 2, shipped: 1,prepared:3,separation:4,confirming:0,billed:2,labels:1,shipping:0,attention:0,cancelled:0 }, recentOrders: [], recentFailed: false, dataLoadFailed: false, updatedAt: '2026-11-11T17:30:00Z' };
 
 test('dashboard apresenta dados, links e estados vazios/indisponíveis, sem controles operacionais', () => {
   const html = renderToStaticMarkup(React.createElement(view.DashboardOverview, { ...base, recentOrders: [{ id: 'one', status: 'label_ready', created_at: base.updatedAt, omie_order_number: '00001146', recipients: [{ full_name: 'Destinatário Exemplo' }], invoices: [{ omie_invoice_number: '00001243' }] }] }));
@@ -31,27 +31,9 @@ test('dashboard apresenta dados, links e estados vazios/indisponíveis, sem cont
   assert.ok(!failed.includes('0 pedidos na fila'));
 });
 
-test('consultas mantêm os critérios dos indicadores e carregam apenas seis pedidos recentes sem gravações', async () => {
-  const calls = [];
-  const db = {
-    auth: { getUser: async () => ({ data: { user: { id: 'user' } } }) },
-    from(table) {
-      const call = { table, filters: [] }; calls.push(call);
-      const query = {
-        select(fields, options) { call.fields = fields; call.options = options; return query; },
-        eq(...args) { call.filters.push(['eq', ...args]); return query; }, neq(...args) { call.filters.push(['neq', ...args]); return query; }, in(...args) { call.filters.push(['in', ...args]); return query; },
-        order(...args) { call.order = args; return query; }, limit(value) { call.limit = value; return query; },
-        then(resolve) { return Promise.resolve({ count: 3, data: [], error: null }).then(resolve); },
-      };
-      return query;
-    },
-  };
-  const page = load('../src/app/page.tsx', { '@/lib/supabase/server': { createSupabaseServerClient: async () => db }, './dashboard-overview': view });
-  const element = await page.default();
-  assert.ok(element);
-  assert.equal(calls.length, 5);
-  assert.deepEqual(calls.slice(0, 4).map(call => call.filters), [[], [['neq', 'status', 'cancelled']], [['in', 'status', ['order_created', 'billing_pending']], ['eq','separation_state','confirmed']], [['eq', 'status', 'shipped']]]);
-  assert.equal(calls[4].limit, 6);
-  assert.deepEqual(calls[4].order, ['created_at', { ascending: false }]);
-  assert.ok(calls.slice(0, 4).every(call => call.options.count === 'exact' && call.options.head === true));
+test('painel usa o consolidado protegido e consulta seis pedidos sem chamar o Omie',async()=>{
+ const calls=[];const counts={recipients:3766,orders:988,prepared:59,separation:839,billing:0,confirming:0,billed:90,labels:90,shipping:0,attention:11,shipped:0,cancelled:1};
+ const db={auth:{async getUser(){return{data:{user:{id:'user'}}};}},async rpc(name){calls.push(name);return{data:counts,error:null};},from(table){calls.push(table);const q={select(){return q;},eq(){return q;},order(){return q;},limit(n){assert.equal(n,6);return q;},async maybeSingle(){return{data:{is_active:true}};},then(resolve){return Promise.resolve({data:[],error:null}).then(resolve);}};return q;}};
+ const page=load('../src/app/page.tsx',{'@/lib/supabase/server':{async createSupabaseServerClient(){return db;}},'./dashboard-overview':view,'next/navigation':{redirect(){assert.fail('Autorizado');}}});
+ const html=renderToStaticMarkup(await page.default());assert.match(html,/839 pedidos aguardando separação/);assert.match(html,/NF-e autorizadas/);assert.match(html,/>90</);assert.ok(calls.includes('operation_overview'));assert.ok(calls.includes('operation_orders'));
 });

@@ -129,16 +129,18 @@ test('tela oferece seleção para operação, bloqueia etiqueta incerta e não g
   const { ShippingManagement } = load('../src/app/expedicao/shipping-management.tsx', {
     react: React, 'react/jsx-runtime': jsxRuntime, 'lucide-react': icons,
     'next/navigation': { useRouter: () => ({ refresh() {} }) },
+    '@/lib/operations-list': { cleanNumber: value => value?.replace(/^0+(?=\d)/,'')||'—' },
+    '@/components/operation-notice': { OperationNotice: ({message})=>React.createElement('details',null,message) },
     '@/components/omie-action-button': { OmieActionButton: () => null }, './label-button': { LabelButton: () => null },
     '@/lib/omie/shipping-label-request': { prepareShippingLabel() { assert.fail('Renderização não pode gerar etiqueta'); } },
     '@/lib/omie/shipping-label-batch': batch,
   });
-  const rows = ['none', 'ready', 'unknown'].map((state, i) => ({ id: String(i), status: 'billed', created_at: '2026-11-11', recipients: { full_name: `Pessoa ${i}` }, shipments: { label_generation_state: state, label_storage_path: state === 'ready' ? '/saved.pdf' : null, label_last_error: i === 2 ? 'Omie não confirmou a geração' : null }, invoices: null }));
+  const rows = ['none', 'ready', 'unknown'].map((state, i) => ({ id: String(i), label_printable: state === 'ready', status: 'billed', created_at: '2026-11-11', recipients: { full_name: `Pessoa ${i}` }, shipments: { label_generation_state: state, label_storage_path: state === 'ready' ? '/saved.pdf' : null, label_last_error: i === 2 ? 'Omie não confirmou a geração' : null }, invoices: null }));
   const render = canGenerate => renderToStaticMarkup(React.createElement(ShippingManagement, { rows, canGenerate, loadError: false }));
   const html = render(true);
   assert.match(html, /Preparar etiquetas selecionadas/);
   assert.match(html, /aria-label="Selecionar envio de Pessoa 2"[^>]*disabled/);
-  assert.match(html, /Erro na etiqueta: Omie não confirmou a geração/);
+  assert.match(html, /Omie não confirmou a geração/);
   assert.ok(!render(false).includes('type="checkbox"'));
 });
 

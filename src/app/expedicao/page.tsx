@@ -1,34 +1,18 @@
-import { redirect } from "next/navigation";
-
-import { createSupabaseServerClient } from "@/lib/supabase/server";
-
-import { ShippingManagement, type ShippingRow } from "./shipping-management";
-
-export const dynamic = "force-dynamic";
-
-function firstRelation<T>(value: T | T[] | null | undefined): T | null { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
-
-export default async function ShippingPage() {
-  const supabase = await createSupabaseServerClient();
-  const { data: authData, error: authError } = await supabase.auth.getUser();
-  if (authError || !authData.user) redirect("/login");
-
-  const { data: profile, error: profileError } = await supabase
-    .from("user_profiles")
-    .select("role, is_active")
-    .eq("id", authData.user.id)
-    .maybeSingle();
-  if (profileError || !profile?.is_active) redirect("/acesso-negado");
-
-  const { data, error } = await supabase
-    .from("fulfillments")
-    .select("id, status, created_at, omie_last_error, delivery_recipient_name,recipients(full_name), delivery_addresses(city, state, postal_code), shipments(carrier_id, tracking_code, tracking_url, estimated_delivery_date, package_count, service_modality, status, label_storage_path, label_generation_state, label_last_error, label_error_at, freight_amount), invoices(omie_invoice_number, access_key, status)")
-    .in("status", ["billing_pending", "billed", "shipping_pending", "label_ready", "shipped"])
-    .order("created_at", { ascending: false })
-    .limit(100);
-
-  const rows = ((data ?? []) as unknown as ShippingRow[]).filter(row => row.status !== "billing_pending" ||
-    ["billing_submitted", "billing_unknown"].includes(firstRelation(row.invoices)?.status ?? "") || Boolean(firstRelation(row.invoices)?.access_key));
-  const canGenerate = ["admin", "gestor", "operador"].includes(profile.role);
-  return <ShippingManagement rows={rows} canGenerate={canGenerate} loadError={Boolean(error)} />;
+import { redirect } from 'next/navigation';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { listParams,loadOperationList,operationTotals,shippingViews } from '@/lib/operations-list';
+import { QueueFilters,QueuePagination } from '@/components/queue-navigation';
+import { ShippingManagement,type ShippingRow } from './shipping-management';
+export const dynamic='force-dynamic';
+export default async function ShippingPage({searchParams}:{searchParams:Promise<Record<string,string|string[]|undefined>>}){
+  const db=await createSupabaseServerClient();const {data:auth,error:authError}=await db.auth.getUser();if(authError||!auth.user)redirect('/login');
+  const {data:profile}=await db.from('user_profiles').select('role,is_active').eq('id',auth.user.id).maybeSingle();if(!profile?.is_active)redirect('/acesso-negado');
+  const params=listParams(await searchParams,shippingViews,'pending');
+  const [result,totals]=await Promise.all([loadOperationList(db,'shipping',params),operationTotals(db,'shipping',shippingViews)]);
+  return <div className="shipping-page"><section className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line"/>LOGÍSTICA</div><h1>Expedição</h1><p className="page-lead">Prepare as etiquetas e imprima os pedidos prontos para postagem.</p></div></section>
+    <QueueFilters path="/expedicao" views={shippingViews} totals={totals} view={params.view} search={params.search}/>
+    <details className="screen-help"><summary>Como gerar e imprimir etiquetas</summary><p>O PDF utiliza uma página de 100 × 150 mm por volume. Imprima em tamanho real (100%). Etiquetas salvas são reutilizadas. Gerações sem confirmação exigem conferência no Omie. Mantenha esta tela aberta durante o lote.</p></details>
+    <ShippingManagement key={params.view+':'+result.state.page+':'+params.search} rows={(result.data??[]) as unknown as ShippingRow[]} canGenerate={['admin','gestor','operador'].includes(profile.role)} loadError={Boolean(result.error)}/>
+    {!result.error&&<QueuePagination path="/expedicao" view={params.view} search={params.search} state={result.state}/>}
+  </div>;
 }

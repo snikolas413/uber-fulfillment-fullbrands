@@ -7,7 +7,8 @@ import { invoiceOrderAction, processNextInvoiceConfirmationAction } from "@/app/
 import { OmieActionButton } from "@/components/omie-action-button";
 import { runBillingBatch } from "@/lib/omie/billing-batch";
 import { isMiniEnviosName } from "@/lib/omie/freight-selection";
-import { billingPageUrl, type BillingListState } from "@/lib/billing-list";
+import { cleanNumber, formatInvoiceDate } from "@/lib/operations-list";
+import { OperationNotice } from "@/components/operation-notice";
 
 type InvoiceRecord = { omie_invoice_number: string | null; access_key: string | null; status: string; issued_at: string | null; danfe_url: string | null; xml_available: boolean; confirmation_state?: string; confirmation_last_error?: string | null };
 type Shipment = { carrier_id: string | null; service_code: string | null; freight_amount: number | null };
@@ -36,7 +37,7 @@ function blockedReason(row: BillingRow, result?: Result) {
   return null;
 }
 
-export function BillingManagement({ rows, canBill, list }: { rows: BillingRow[]; canBill: boolean; list: BillingListState }) {
+export function BillingManagement({ rows, canBill, count, allowSubmission=true }: { rows: BillingRow[]; canBill: boolean; count: number; allowSubmission?: boolean }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [results, setResults] = useState<Record<string, Result>>({});
@@ -74,7 +75,7 @@ export function BillingManagement({ rows, canBill, list }: { rows: BillingRow[];
     timer = setTimeout(tick, 1000);
     return () => { stopped = true; clearTimeout(timer); };
   }, [canBill, router]);
-  const eligible = rows.filter(row => !blockedReason(row, results[row.id]));
+  const eligible = allowSubmission ? rows.filter(row => !blockedReason(row, results[row.id])) : [];
   const selectedRows = eligible.filter(row => selected.has(row.id));
   const allSelected = eligible.length > 0 && eligible.every(row => selected.has(row.id));
   const total = batchIds.length;
@@ -82,10 +83,10 @@ export function BillingManagement({ rows, canBill, list }: { rows: BillingRow[];
   const completed = batchResults.length;
   const confirmed = batchResults.filter(result => result.billingOutcome === "confirmed").length;
   const awaiting = batchResults.filter(result => result.billingOutcome === "submitted").length;
-  const pages = { prepared: list.prepared.page, pending: list.pending.page, billed: list.billed.page };
+
 
   async function run() {
-    if (!canBill || runningRef.current || !selectedRows.length || selectedRows.length > 100) return;
+    if (!canBill || !allowSubmission || runningRef.current || !selectedRows.length || selectedRows.length > 100) return;
     const orders = selectedRows.map(row => "#" + row.omie_order_number).join(", ");
     if (!window.confirm(`Confirmar faturamento de ${selectedRows.length} pedido(s) no Omie?\n\nPedidos: ${orders}\n\nEsta operação poderá emitir NF-e real para todos os pedidos selecionados e movimentar estoque. Os pedidos devem estar configurados sem contas a receber e sem boleto, com vencimento em 31/12/2026. Confira os dados comerciais e fiscais antes de continuar.`)) return;
     runningRef.current = true;
@@ -110,8 +111,8 @@ export function BillingManagement({ rows, canBill, list }: { rows: BillingRow[];
 
   return <section className="panel orders-panel">
     <div className="recipient-toolbar billing-toolbar">
-      <div><span className="section-kicker">FILA DE FATURAMENTO</span><h2>Pedidos e notas fiscais</h2></div>
-      {canBill && <div className="billing-batch-actions">
+      <div><span className="section-kicker">FILA DE FATURAMENTO</span><h2>Pedidos e notas fiscais</h2><small>{count} pedido(s) nesta fila</small></div>
+      {canBill && allowSubmission && <div className="billing-batch-actions">
         <span>{selectedRows.length} selecionado(s)</span>
         <button className="primary-button" disabled={running || !selectedRows.length} onClick={run}>
           {running ? <LoaderCircle size={15} className="auth-spinner" /> : <FileCheck2 size={15} />}
@@ -126,11 +127,10 @@ export function BillingManagement({ rows, canBill, list }: { rows: BillingRow[];
       {waitingUntil && <small>Aguardando liberação da API até {new Date(waitingUntil).toLocaleTimeString("pt-BR")}. O lote seguirá para o próximo pedido.</small>}
       {running && <small>Mantenha esta página aberta. O lote segue após o aceite; a NF-e é conferida em uma fila separada.</small>}
     </div>}
-    <div className="orders-notice"><p>As confirmações são consultadas enquanto esta página estiver aberta, sem repetir a emissão. Pendências ficam salvas e a conferência continua ao reabrir Faturamento.</p></div>
     {confirmationNotice && <div role="status" className="recipient-alert recipient-alert-error">{confirmationNotice} Atualize a página para retomar a conferência.</div>}
     {rows.length ? <div className="orders-table-wrap"><table className="orders-table billing-table">
       <thead><tr>
-        {canBill && <th><input type="checkbox" aria-label="Selecionar todos os pedidos disponíveis" checked={allSelected} disabled={running || !eligible.length}
+        {canBill && allowSubmission && <th><input type="checkbox" aria-label="Selecionar todos os pedidos disponíveis" checked={allSelected} disabled={running || !eligible.length}
           onChange={event => setSelected(event.target.checked ? new Set(eligible.map(row => row.id)) : new Set())} /></th>}
         <th>DESTINATÁRIO</th><th>PEDIDO OMIE</th><th>STATUS</th><th>NF-E / DOCUMENTOS</th><th>EMISSÃO</th><th>RESULTADO / AÇÕES</th>
       </tr></thead>
@@ -139,21 +139,21 @@ export function BillingManagement({ rows, canBill, list }: { rows: BillingRow[];
         const result = results[row.id];
         const blocked = blockedReason(row, result);
         return <tr key={row.id} className={activeId === row.id ? "billing-row-active" : undefined}>
-          {canBill && <td><input type="checkbox" aria-label={`Selecionar pedido ${row.omie_order_number ?? "sem número"}`} title={blocked ?? "Selecionar para faturar"}
+          {canBill && allowSubmission && <td><input type="checkbox" aria-label={`Selecionar pedido ${row.omie_order_number ?? "sem número"}`} title={blocked ?? "Selecionar para faturar"}
             checked={selected.has(row.id) && !blocked} disabled={running || Boolean(blocked)} onChange={event => setSelected(previous => {
               const next = new Set(previous); if (event.target.checked) next.add(row.id); else next.delete(row.id); return next;
             })} /></td>}
           <td><strong>{row.delivery_recipient_name ?? row.recipients?.full_name ?? "Destinatário indisponível"}</strong><small>{date(row.created_at)}</small></td>
-          <td>{row.omie_order_number ? "#" + row.omie_order_number : "Aguardando número"}</td>
-          <td><span className={`order-status order-status-${row.status}`}>{result?.billingOutcome === "confirmed" || (row.status === "billed" && invoice?.omie_invoice_number && invoice.access_key) ? "Faturado" : result?.billingOutcome === "submitted" || ["pending", "checking"].includes(invoice?.confirmation_state ?? "") ? "Aguardando confirmação da NF-e" : invoice?.confirmation_state === "error" ? "Conferir confirmação" : row.status === "billed" ? "Faturado" : invoice?.status.startsWith("billing_") && invoice.status !== "billing_rejected" ? "Conferir emissão" : "Aguardando faturamento"}</span></td>
-          <td><strong>{result?.invoiceNumber || invoice?.omie_invoice_number || "—"}</strong><small>{invoice?.danfe_url ? <a href={invoice.danfe_url} target="_blank" rel="noreferrer">Abrir DANFE</a> : "DANFE não disponível"}</small><small>{invoice?.xml_available ? "XML disponível no Omie" : "XML ainda não recebido"}</small></td>
-          <td>{date(invoice?.issued_at ?? null)}</td>
+          <td>{row.omie_order_number ? "#" + cleanNumber(row.omie_order_number) : "Aguardando número"}</td>
+          <td><span className={`order-status order-status-${row.status}`}>{result?.billingOutcome === "confirmed" || (invoice?.status === "006" && invoice.omie_invoice_number && invoice.access_key) ? "Faturado" : result?.billingOutcome === "submitted" || ["pending", "checking"].includes(invoice?.confirmation_state ?? "") ? "Aguardando confirmação da NF-e" : invoice?.confirmation_state === "error" ? "Conferir confirmação" : row.status === "billed" ? "Conferir NF-e" : invoice?.status.startsWith("billing_") && invoice.status !== "billing_rejected" ? "Conferir emissão" : "Aguardando faturamento"}</span></td>
+          <td><strong>{cleanNumber(result?.invoiceNumber || invoice?.omie_invoice_number)}</strong><small>{invoice?.danfe_url ? <a href={invoice.danfe_url} target="_blank" rel="noreferrer">Abrir DANFE</a> : "DANFE não disponível"}</small><small>{invoice?.xml_available ? "XML disponível no Omie" : "XML ainda não recebido"}</small></td>
+          <td>{formatInvoiceDate(invoice?.issued_at)}</td>
           <td>
             {activeId === row.id && <small role="status">Processando este pedido...</small>}
-            {result && <small className={`omie-action-result omie-action-result-${result.status}`}>{result.message}</small>}
-            {!result && row.omie_last_error && <small className="omie-action-result omie-action-result-warning">{row.omie_last_error}</small>}
-            {!result && !row.omie_last_error && invoice?.confirmation_last_error && <small className="omie-action-result omie-action-result-warning">{invoice.confirmation_last_error}</small>}
-            {!result && !row.omie_last_error && blocked && <small>{blocked}</small>}
+            {result && (result.status === "success" ? <small className="omie-action-result omie-action-result-success">{result.message}</small> : <OperationNotice message={result.message}/>)}
+            {!result && row.omie_last_error && <OperationNotice message={row.omie_last_error}/>}
+            {!result && !row.omie_last_error && invoice?.confirmation_last_error && <OperationNotice message={invoice.confirmation_last_error}/>}
+            {!result && !row.omie_last_error && blocked && blocked !== "Já faturado" && <small>{blocked}</small>}
             {!running && <OmieActionButton fulfillmentId={row.id} kind="sync-order" size="small" />}
             {canBill && !running && ["order_created", "billing_pending"].includes(row.status) &&
               (blocked === "Resolva a pendência de frete antes de faturar" || blocked === "Frete ainda não confirmado") && <>
@@ -165,15 +165,7 @@ export function BillingManagement({ rows, canBill, list }: { rows: BillingRow[];
           </td>
         </tr>;
       })}</tbody>
-    </table></div> : <div className="recipient-empty"><span className="recipient-empty-icon"><FileText size={24} /></span><strong>Nenhum pedido aguardando faturamento</strong><p>Envie os pedidos preparados ao Omie para selecioná-los nesta fila.</p></div>}
-    {(["pending", "billed"] as const).map(queue => <div className="recipient-table-footer" key={queue}>
-      <span>{queue === "pending" ? "Pendentes" : "Faturados"}: {rows.filter(row => queue === "pending" ? row.status !== "billed" : row.status === "billed").length} de {list[queue].count} pedido(s)</span>
-      <nav aria-label={queue === "pending" ? "Páginas de pedidos pendentes" : "Páginas de pedidos faturados"} className="order-list-pagination">
-        <button type="button" className="secondary-button" disabled={running || list[queue].page <= 1} onClick={() => router.push(billingPageUrl(pages, queue, list[queue].page - 1))}>Anterior</button>
-        <span>Página {list[queue].page} de {list[queue].pageCount}</span>
-        <button type="button" className="secondary-button" disabled={running || list[queue].page >= list[queue].pageCount} onClick={() => router.push(billingPageUrl(pages, queue, list[queue].page + 1))}>Próxima</button>
-      </nav>
-    </div>)}
-    <div className="recipient-table-footer"><span>Selecione até 100 pedidos da página atual por lote.</span><span>Emissões sem confirmação não são reenviadas automaticamente.</span></div>
+    </table></div> : <div className="recipient-empty"><span className="recipient-empty-icon"><FileText size={24} /></span><strong>Nenhum pedido nesta fila</strong><p>Os pedidos aparecem aqui conforme a separação, a emissão e a confirmação da nota.</p></div>}
+    <div className="recipient-table-footer"><span>{allowSubmission?"Selecione até 100 pedidos da página atual por lote.":"Notas e resultados mantidos para consulta."}</span><span>Emissões sem confirmação não são reenviadas automaticamente.</span></div>
   </section>;
 }

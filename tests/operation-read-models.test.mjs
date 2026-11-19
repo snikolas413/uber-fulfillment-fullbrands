@@ -1,0 +1,48 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { PGlite } from '@electric-sql/pglite';
+test('indicadores e filas acompanham NF-e e PDF, cancelamento, mudança de etapa e RLS',async()=>{
+ const db=new PGlite();
+ try{
+  await db.exec(`create role anon;create role authenticated;
+   create table recipients(id uuid primary key,full_name text,document_number text,email text,phone text,created_at timestamptz default now(),updated_at timestamptz default now());
+   create table delivery_addresses(id uuid primary key,recipient_id uuid,city text,state text,postal_code text,validation_status text,created_at timestamptz default now());
+   create table fulfillments(id uuid primary key,recipient_id uuid,delivery_address_id uuid,status text,created_at timestamptz default now(),updated_at timestamptz default now(),omie_order_id bigint,omie_order_number text,omie_last_error text,omie_last_sync_at timestamptz,separation_state text default 'none',delivery_recipient_name text,customer_purchase_order text,customer_email text);
+   create table fulfillment_items(id uuid,fulfillment_id uuid,product_code text,description text,quantity numeric,unit_price numeric,line_total numeric);
+   create table invoices(id uuid primary key,fulfillment_id uuid unique,omie_invoice_number text,access_key text,status text,issued_at timestamptz,danfe_url text,xml_available boolean,confirmation_state text,confirmation_last_error text);
+   create table shipments(id uuid primary key,fulfillment_id uuid unique,carrier_id text,service_code text,tracking_code text,tracking_url text,estimated_delivery_date date,package_count int,service_modality text,status text,label_storage_path text,label_generation_state text,label_last_error text,label_error_at timestamptz,freight_amount numeric,label_invoice_key text);
+   insert into recipients(id,full_name)values('11111111-1111-4111-8111-111111111111','Pessoa exemplo');
+   insert into delivery_addresses(id,recipient_id,city,validation_status)values('11111111-1111-4111-8111-111111111111','11111111-1111-4111-8111-111111111111','Cidade','valid');
+   insert into fulfillments(id,recipient_id,delivery_address_id,status) select ('00000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'11111111-1111-4111-8111-111111111111','11111111-1111-4111-8111-111111111111','order_created' from generate_series(1,6)n;
+   update fulfillments set status='ready' where id::text like '%000001';
+   update fulfillments set separation_state='confirmed',status='billing_pending' where id::text like '%000003';
+   update fulfillments set status='label_ready' where id::text like '%000004';
+   update fulfillments set status='cancelled' where id::text like '%000005';
+   update fulfillments set status='billing_pending' where id::text like '%000006';
+   insert into invoices(id,fulfillment_id,status,access_key,omie_invoice_number,confirmation_state) select gen_random_uuid(),id,'006',repeat('1',44),'1350','none' from fulfillments where id::text like '%000004' or id::text like '%000005';
+   insert into invoices(id,fulfillment_id,status,confirmation_state) select gen_random_uuid(),id,'billing_unknown','pending' from fulfillments where id::text like '%000006';
+   insert into shipments(id,fulfillment_id,carrier_id,service_code,freight_amount,label_generation_state,label_storage_path,label_invoice_key) select gen_random_uuid(),id,'123','04227',0,case when status in ('label_ready','cancelled') then 'ready' else 'none' end,case when status in ('label_ready','cancelled') then id::text||'/'||repeat('1',44)||'/etiqueta-nfe-v1.pdf' end,repeat('1',44) from fulfillments;
+  `);
+  await db.exec(readFileSync('supabase/migrations/20261119145449_operational_read_models.sql','utf8'));
+  await db.exec(readFileSync('supabase/migrations/20261119185226_operational_search_normalization.sql','utf8'));
+  await db.exec("update recipients set full_name='João da Silva'");
+  assert.equal((await db.query("select id from recipient_directory where search_text ilike '%joao da silva%'")).rows.length,1);
+  const overview=async()=>(await db.query('select operation_overview() as counts')).rows[0].counts;
+  let counts=await overview();assert.equal(counts.orders,5);assert.equal(counts.billed,1);assert.equal(counts.labels,1);assert.equal(counts.billing,1);assert.equal(counts.confirming,1);assert.equal(counts.cancelled,1);
+  await db.exec("update fulfillments set status='shipping_pending' where id::text like '%000004'");
+  counts=await overview();assert.equal(counts.billed,1);assert.equal(counts.labels,1);
+  await db.exec("update shipments set label_storage_path=null where fulfillment_id::text like '%000004'");
+  counts=await overview();assert.equal(counts.labels,0);assert.equal(counts.billed,1);
+  await db.exec("update shipments set label_generation_state='unknown',label_last_error='Conferir Omie' where fulfillment_id::text like '%000004'");
+  assert.equal((await overview()).attention,1);
+  assert.equal((await db.query("select shipping_queue from operation_orders where id::text like '%000004'")).rows[0].shipping_queue,'attention');
+  await db.exec(`grant usage on schema public to authenticated,anon;grant select on all tables in schema public to authenticated;
+    alter table fulfillments enable row level security;create policy limited on fulfillments for select to authenticated using(status='ready');
+    alter table recipients enable row level security;create policy recipients_read on recipients for select to authenticated using(true);
+    set role authenticated;`);
+  counts=await overview();assert.equal(counts.orders,1);assert.equal(counts.billed,0);assert.equal((await db.query('select * from operation_orders')).rows.length,1);
+  await assert.rejects(db.exec("update operation_orders set status='billed'"));
+  await db.exec('reset role;set role anon');await assert.rejects(db.query('select operation_overview()'));await assert.rejects(db.query('select * from recipient_directory'));
+ }finally{await db.close();}
+});
